@@ -72,7 +72,7 @@ app.post('/api/chat', async (req, res) => {
   // to Ollama too, instead of leaving it to generate in the background where
   // it keeps burning CPU/RAM the user was trying to reclaim.
   const upstreamController = new AbortController();
-  req.on('close', () => upstreamController.abort());
+  res.on('close', () => upstreamController.abort());
 
   let upstream;
   try {
@@ -101,7 +101,7 @@ app.post('/api/chat', async (req, res) => {
   res.on('error', () => {});
 
   const reader = upstream.body.getReader();
-  req.on('close', () => reader.cancel().catch(() => {}));
+  res.on('close', () => reader.cancel().catch(() => {}));
 
   try {
     while (true) {
@@ -132,7 +132,7 @@ app.post('/api/pull', async (req, res) => {
   }
 
   const upstreamController = new AbortController();
-  req.on('close', () => upstreamController.abort());
+  res.on('close', () => upstreamController.abort());
 
   let upstream;
   try {
@@ -159,7 +159,7 @@ app.post('/api/pull', async (req, res) => {
   res.on('error', () => {});
 
   const reader = upstream.body.getReader();
-  req.on('close', () => reader.cancel().catch(() => {}));
+  res.on('close', () => reader.cancel().catch(() => {}));
 
   try {
     while (true) {
