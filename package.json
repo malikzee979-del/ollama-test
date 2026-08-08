@@ -1,0 +1,17 @@
+{
+  "name": "ollama-chat",
+  "version": "1.0.0",
+  "description": "A local web chat UI for Ollama models",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
