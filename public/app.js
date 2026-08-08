@@ -405,6 +405,8 @@
       del.className = 'del-model';
       del.type = 'button';
       del.textContent = 'Delete';
+      del.title = `Delete ${m.name}`;
+      del.setAttribute('aria-label', `Delete ${m.name}`);
       del.onclick = () => deleteModel(m.name);
 
       item.appendChild(name);

@@ -48,7 +48,7 @@
         </div>
       </section>
 
-      <div id="memoryWarning" class="memory-warning hidden"></div>
+      <div id="memoryWarning" class="memory-warning hidden" role="status" aria-live="polite"></div>
 
       <form id="composer" class="composer">
         <textarea id="promptInput" rows="1" placeholder="Message your local model…" autofocus></textarea>
@@ -99,7 +99,7 @@
             <input id="pullModelInput" type="text" placeholder="e.g. llama3.1:8b" />
             <button id="pullModelBtn" class="btn btn-ghost">Pull</button>
           </div>
-          <div id="pullProgress" class="pull-progress hidden">
+          <div id="pullProgress" class="pull-progress hidden" role="status" aria-live="polite">
             <div class="pull-progress-bar"><div id="pullProgressFill" class="pull-progress-fill"></div></div>
             <small id="pullProgressText"></small>
           </div>

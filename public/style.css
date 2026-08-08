@@ -422,7 +422,7 @@ html, body {
   cursor: pointer;
   flex-shrink: 0;
 }
-.model-manage-item .del-model:hover { background: rgba(255,107,107,0.1); }
+.model-manage-item .del-model:hover { background: rgba(255,107,107,0.1); color: var(--danger-hover); }
 .model-manage-empty { color: var(--text-faint); font-size: 12.5px; padding: 6px 2px; }
 
 .pull-row { display: flex; gap: 8px; }
@@ -472,4 +472,6 @@ html, body {
   :root { --sidebar-w: 240px; }
   .msg-row { padding: 12px 14px; }
   .composer { padding: 10px 12px 4px; }
+  .pull-row { flex-direction: column; }
+  .pull-row .btn { width: 100%; }
 }

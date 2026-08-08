@@ -95,6 +95,10 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('X-Accel-Buffering', 'no');
+  // If the client goes away mid-stream, writing further chunks can raise an
+  // EPIPE/ECONNRESET 'error' event on the response; without a listener that
+  // would bubble up as an unhandled exception and crash the process.
+  res.on('error', () => {});
 
   const reader = upstream.body.getReader();
   req.on('close', () => reader.cancel().catch(() => {}));
@@ -108,14 +112,24 @@ app.post('/api/chat', async (req, res) => {
   } catch (err) {
     // Client likely disconnected or upstream dropped; nothing more to do.
   } finally {
-    res.end();
+    if (!res.writableEnded) res.end();
   }
 });
 
 // Pull a model with streaming progress.
 app.post('/api/pull', async (req, res) => {
   const { name } = req.body || {};
-  if (!name) return res.status(400).json({ error: 'Missing "name" in request body.' });
+
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Missing "name" in request body.' });
+  }
+  const trimmedName = name.trim();
+  // Ollama model tags are single tokens like "llama3:8b" — reject anything
+  // with whitespace or control characters, which can't be a valid tag and
+  // would otherwise be forwarded verbatim to the upstream Ollama API.
+  if (/[\s\x00-\x1F\x7F]/.test(trimmedName)) {
+    return res.status(400).json({ error: 'Invalid "name": must not contain whitespace or control characters.' });
+  }
 
   const upstreamController = new AbortController();
   req.on('close', () => upstreamController.abort());
@@ -125,7 +139,7 @@ app.post('/api/pull', async (req, res) => {
     upstream = await fetch(`${OLLAMA_HOST}/api/pull`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, stream: true }),
+      body: JSON.stringify({ name: trimmedName, stream: true }),
       signal: upstreamController.signal,
     });
   } catch (err) {
@@ -140,6 +154,9 @@ app.post('/api/pull', async (req, res) => {
 
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
+  // See /api/chat: guard against unhandled 'error' events from writing to a
+  // response whose client has already disconnected.
+  res.on('error', () => {});
 
   const reader = upstream.body.getReader();
   req.on('close', () => reader.cancel().catch(() => {}));
@@ -153,7 +170,7 @@ app.post('/api/pull', async (req, res) => {
   } catch (err) {
     // ignore
   } finally {
-    res.end();
+    if (!res.writableEnded) res.end();
   }
 });
 
