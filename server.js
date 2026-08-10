@@ -7,6 +7,7 @@ const logger = require('./logger');
 const metrics = require('./metrics');
 const qdrant = require('./qdrant');
 const embeddings = require('./embeddings');
+const { compactMessages, DEFAULTS: COMPACTION_DEFAULTS } = require('./compaction');
 
 const app = express();
 const PORT = process.env.PORT || 4173;
@@ -38,6 +39,43 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Chat compaction settings — see README.md "Chat compaction" section.
+const COMPACTION_MAX_MESSAGES = Number(process.env.COMPACTION_MAX_MESSAGES) || COMPACTION_DEFAULTS.maxMessages;
+const COMPACTION_MAX_CHARS = Number(process.env.COMPACTION_MAX_CHARS) || COMPACTION_DEFAULTS.maxChars;
+const COMPACTION_KEEP_RECENT = Number(process.env.COMPACTION_KEEP_RECENT) || COMPACTION_DEFAULTS.keepRecent;
+const COMPACTION_MODEL = process.env.COMPACTION_MODEL || null;
+
+// Calls Ollama's non-streaming chat endpoint to produce a concise summary
+// of a slice of older messages. Injected into compactMessages() so the
+// compaction logic itself stays free of any HTTP/Ollama specifics.
+async function summarizeWithOllama(messagesToSummarize, model) {
+  const summaryModel = COMPACTION_MODEL || model;
+  const r = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: summaryModel,
+      stream: false,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Summarize the following conversation turns concisely and factually. ' +
+            'Capture key facts, decisions made, and any unresolved questions. ' +
+            'Do not add commentary or restate this instruction; output only the summary.',
+        },
+        ...messagesToSummarize,
+      ],
+    }),
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    throw new Error(`Ollama summarization request failed (status ${r.status}): ${text}`);
+  }
+  const data = await r.json();
+  return (data && data.message && data.message.content) || '';
+}
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -106,6 +144,18 @@ app.post('/api/chat', async (req, res) => {
   if (!model) return res.status(400).json({ error: 'Missing "model" in request body.' });
   if (!Array.isArray(messages)) return res.status(400).json({ error: '"messages" must be an array.' });
 
+  // Pre-process the outgoing messages: if the conversation has grown too
+  // large, fold older turns into a compact summary before forwarding to
+  // Ollama. This is purely a transformation of the `messages` array sent
+  // upstream — it does not touch or alter the streaming response below.
+  const compactedMessages = await compactMessages({
+    messages,
+    keepRecent: COMPACTION_KEEP_RECENT,
+    maxMessages: COMPACTION_MAX_MESSAGES,
+    maxChars: COMPACTION_MAX_CHARS,
+    summarize: (msgs) => summarizeWithOllama(msgs, model),
+  });
+
   // Tied to the client connection: if the browser aborts (Stop button, tab
   // close, network drop), this immediately tears down the upstream request
   // to Ollama too, instead of leaving it to generate in the background where
@@ -118,7 +168,7 @@ app.post('/api/chat', async (req, res) => {
     upstream = await fetch(`${OLLAMA_HOST}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, options, keep_alive, stream: true }),
+      body: JSON.stringify({ model, messages: compactedMessages, options, keep_alive, stream: true }),
       signal: upstreamController.signal,
     });
   } catch (err) {
