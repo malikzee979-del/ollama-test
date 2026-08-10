@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const db = require('./db');
 const logger = require('./logger');
 const metrics = require('./metrics');
+const qdrant = require('./qdrant');
+const embeddings = require('./embeddings');
 
 const app = express();
 const PORT = process.env.PORT || 4173;
@@ -309,7 +311,63 @@ app.delete('/api/sessions/:id', (req, res) => {
   }
 });
 
+// Semantic memory over past chat messages, backed by Qdrant for vector
+// search. Qdrant stores vectors + metadata payloads only — it is not the
+// primary chat-history store. Both routes degrade gracefully: if Qdrant or
+// the embeddings call fails, they return 503 rather than crashing.
+
+// Index one message (or an array of them) for later semantic search.
+// Body: { id, text, metadata } or an array of such objects.
+app.post('/api/memory/index', async (req, res) => {
+  const items = Array.isArray(req.body) ? req.body : [req.body];
+
+  for (const item of items) {
+    if (!item || typeof item.text !== 'string' || !item.text.trim()) {
+      return res.status(400).json({ error: 'Each item requires a non-empty "text" field.' });
+    }
+  }
+
+  try {
+    for (const item of items) {
+      const vector = await embeddings.embed(item.text);
+      await qdrant.upsertPoint({
+        id: item.id ?? crypto.randomUUID(),
+        vector,
+        payload: item.metadata || {},
+      });
+    }
+    res.json({ ok: true, indexed: items.length });
+  } catch (err) {
+    res.status(503).json({ error: `Semantic memory indexing failed: ${err.message}` });
+  }
+});
+
+// Search past indexed messages by semantic similarity.
+// Body: { query, limit }.
+app.post('/api/memory/search', async (req, res) => {
+  const { query, limit } = req.body || {};
+  if (typeof query !== 'string' || !query.trim()) {
+    return res.status(400).json({ error: 'Missing "query" in request body.' });
+  }
+
+  try {
+    const vector = await embeddings.embed(query);
+    const results = await qdrant.searchByVector(vector, { limit: limit || 5 });
+    res.json({ results });
+  } catch (err) {
+    res.status(503).json({ error: `Semantic memory search failed: ${err.message}` });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Ollama Chat running at http://localhost:${PORT}`);
   console.log(`Proxying Ollama at ${OLLAMA_HOST}`);
+
+  // Non-fatal startup check: warn once if Qdrant isn't reachable, but never
+  // block or crash the server on it.
+  qdrant.checkConnection().then((result) => {
+    if (!result.ok) {
+      console.warn(`Warning: Qdrant unreachable at ${qdrant.QDRANT_URL} (semantic memory endpoints will return 503 until it's available): ${result.error}`);
+    }
+  });
 });
