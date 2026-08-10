@@ -40,6 +40,36 @@ Then open `http://localhost:4173` (or your chosen `PORT`) in a browser.
 | `/api/pull` | POST | Pulls a model with streaming progress; body: `{ name }`. Aborts the upstream pull if the client disconnects. |
 | `/api/models/:name` | DELETE | Deletes an installed model by name. |
 
+## Chat history (local database)
+
+The server can also persist chat sessions itself, in a JSON file under
+`./data/sessions.json` (created on first use; the whole `data/` directory is
+git-ignored, so chat content never gets committed). This is separate from —
+and not currently wired up to — the frontend's existing localStorage-based
+history; the two will be reconciled in a later change.
+
+A session looks like:
+
+```json
+{
+  "id": "b3f1...",
+  "title": "New chat",
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "messages": [
+    { "role": "user", "content": "hi", "createdAt": "2024-01-01T00:00:00.000Z" }
+  ]
+}
+```
+
+| Route | Method | Description |
+| --- | --- | --- |
+| `/api/sessions` | GET | Lists session summaries: `{ sessions: [{ id, title, createdAt, updatedAt }] }` (messages omitted). |
+| `/api/sessions` | POST | Creates a new session; body: `{ title? }`. Returns the full new session (201). |
+| `/api/sessions/:id` | GET | Returns the full session, including `messages`. 404 if the id doesn't exist. |
+| `/api/sessions/:id` | PATCH | Updates a session; body: `{ title?, messages?, appendMessages? }`. `messages` replaces the full array, `appendMessages` appends to it (both can be combined: replace then append). Returns the updated session. 400 on malformed messages, 404 if the id doesn't exist. |
+| `/api/sessions/:id` | DELETE | Deletes a session; returns `{ ok: true }`. 404 if the id doesn't exist. |
+
 ## Memory-fit warning
 
 Loading a model whose weights don't fit in available RAM doesn't fail
