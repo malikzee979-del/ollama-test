@@ -39,6 +39,55 @@ Then open `http://localhost:4173` (or your chosen `PORT`) in a browser.
 | `/api/chat` | POST | Streaming chat proxy; forwards newline-delimited JSON chunks from Ollama as they arrive. Aborts the upstream request if the client disconnects. |
 | `/api/pull` | POST | Pulls a model with streaming progress; body: `{ name }`. Aborts the upstream pull if the client disconnects. |
 | `/api/models/:name` | DELETE | Deletes an installed model by name. |
+| `/api/memory/index` | POST | Embeds text and stores it in Qdrant for semantic search; body: `{ id, text, metadata }` (or an array of such objects to batch). |
+| `/api/memory/search` | POST | Embeds a query and returns the most similar indexed messages from Qdrant; body: `{ query, limit }`. |
+
+## Semantic memory (Qdrant)
+
+The `/api/memory/index` and `/api/memory/search` endpoints add optional
+semantic search / RAG over past chat messages, backed by
+[Qdrant](https://qdrant.tech) as the vector store. **Qdrant here only stores
+vectors and metadata payloads for similarity search — it is not the primary
+chat-history store** (that's a separate feature). These endpoints are not
+wired into `/api/chat` automatically; nothing calls them unless you do.
+
+### Endpoints
+
+- `POST /api/memory/index`
+  Body: `{ "id": "optional-id", "text": "message text", "metadata": { "role": "user", "..." : "..." } }`,
+  or an array of such objects to index several messages in one call. `id` is
+  optional — a UUID is generated if omitted. Embeds `text` with Ollama and
+  upserts the resulting vector into Qdrant with `metadata` as the payload.
+  Returns `{ ok: true, indexed: <count> }`.
+
+- `POST /api/memory/search`
+  Body: `{ "query": "search text", "limit": 5 }` (`limit` optional, defaults
+  to 5). Embeds `query` and returns the closest matches from Qdrant:
+  `{ "results": [{ "id", "score", "payload" }, ...] }`.
+
+Both endpoints return `503 { "error": "..." }` if Qdrant or the Ollama
+embeddings call is unavailable — they never crash the server.
+
+### Environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `QDRANT_URL` | `http://127.0.0.1:6333` | Qdrant REST endpoint. |
+| `QDRANT_COLLECTION` | `chat_messages` | Qdrant collection used for message vectors; created automatically on first use. |
+| `EMBEDDING_DIM` | `768` | Vector size for the Qdrant collection; must match your embedding model's output dimension. |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model used to generate embeddings (must be pulled, e.g. `ollama pull nomic-embed-text`). |
+
+### Local dev setup
+
+Run Qdrant locally with Docker:
+
+```bash
+docker run -p 6333:6333 qdrant/qdrant
+```
+
+If Qdrant isn't reachable, the server logs a single startup warning and
+keeps running normally — every other route is unaffected, and the two
+memory endpoints simply respond with a `503` until Qdrant is available.
 
 ## Memory-fit warning
 
