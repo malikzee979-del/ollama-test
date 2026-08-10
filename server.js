@@ -1,11 +1,41 @@
 const express = require('express');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const db = require('./db');
+const logger = require('./logger');
+const metrics = require('./metrics');
 
 const app = express();
 const PORT = process.env.PORT || 4173;
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+
+// Request logging + metrics. Registered first so it wraps every route,
+// including the streaming ones below. It never buffers or rewrites the
+// response body — it only attaches a response header and a 'finish'
+// listener — so it can't interfere with streaming. It never logs request
+// or response bodies (chat content must never end up in logs), only
+// method/path/status/duration/request-id.
+app.use((req, res, next) => {
+  const requestId = crypto.randomBytes(6).toString('hex');
+  res.setHeader('X-Request-Id', requestId);
+  const startedAt = process.hrtime.bigint();
+
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    // Prefer the matched route pattern (e.g. "/api/models/:name") over the
+    // raw path so metrics/logs don't fragment per model name; falls back to
+    // the raw path for unmatched routes (404s).
+    const route = (req.route && req.baseUrl + req.route.path) || req.path;
+
+    logger.info(
+      `${req.method} ${route} ${res.statusCode} ${durationMs.toFixed(1)}ms id=${requestId}`
+    );
+    metrics.record({ route, method: req.method, status: res.statusCode, durationMs });
+  });
+
+  next();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -31,6 +61,12 @@ app.get('/api/health', async (_req, res) => {
   } catch (err) {
     res.status(503).json({ ok: false, error: `Cannot reach Ollama at ${OLLAMA_HOST}: ${err.message}` });
   }
+});
+
+// In-memory observability snapshot: per-route request counts/latencies,
+// total requests, total upstream (Ollama) error count, uptime, and memory.
+app.get('/api/metrics', (_req, res) => {
+  res.json(metrics.snapshot());
 });
 
 // List locally installed models.
