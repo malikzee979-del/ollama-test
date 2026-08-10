@@ -13,6 +13,15 @@
   let sidebarCollapsed = false;
   let systemInfo = null; // { totalMemory, freeMemory }
   let pullController = null;
+  let pendingAttachments = []; // [{ name, content, size }] staged for the next message
+
+  // ---------- Attachments ----------
+  const ATTACHMENT_EXTENSIONS = [
+    '.txt', '.md', '.markdown', '.json', '.csv', '.tsv', '.log',
+    '.js', '.ts', '.py', '.html', '.css', '.yaml', '.yml', '.xml', '.sh',
+  ];
+  const ATTACHMENT_MAX_SIZE = 200 * 1024; // 200KB per file
+  const ATTACHMENT_MAX_COUNT = 3; // per message
 
   // ---------- Elements ----------
   const el = {
@@ -52,6 +61,9 @@
     pullProgressFill: document.getElementById('pullProgressFill'),
     pullProgressText: document.getElementById('pullProgressText'),
     memoryWarning: document.getElementById('memoryWarning'),
+    fileInput: document.getElementById('fileInput'),
+    attachBtn: document.getElementById('attachBtn'),
+    pendingAttachments: document.getElementById('pendingAttachments'),
   };
 
   // ---------- Persistence ----------
@@ -157,10 +169,12 @@
       title.className = 'title';
       title.textContent = chat.title;
 
-      const del = document.createElement('span');
+      const del = document.createElement('button');
+      del.type = 'button';
       del.className = 'del';
       del.textContent = '✕';
       del.title = 'Delete chat';
+      del.setAttribute('aria-label', `Delete chat "${chat.title}"`);
       del.onclick = (e) => deleteChat(chat.id, e);
 
       item.appendChild(title);
@@ -253,10 +267,23 @@
 
     const content = document.createElement('div');
     content.className = 'msg-content';
-    content.innerHTML = renderMarkdown(msg.content || '');
+    if (msg.role === 'assistant' && !msg.content) {
+      content.innerHTML = '<span class="typing-dots" role="status" aria-label="Assistant is typing"><span></span><span></span><span></span></span>';
+    } else {
+      content.innerHTML = renderMarkdown(msg.content || '');
+    }
 
     body.appendChild(role);
     body.appendChild(content);
+
+    if (msg.attachments && msg.attachments.length) {
+      const attachmentsRow = document.createElement('div');
+      attachmentsRow.className = 'msg-attachments';
+      for (const att of msg.attachments) {
+        attachmentsRow.appendChild(buildAttachmentChip(att, { removable: false }));
+      }
+      body.appendChild(attachmentsRow);
+    }
 
     if (msg.role === 'assistant' && msg.content) {
       const actions = document.createElement('div');
@@ -507,6 +534,84 @@
     }
   });
 
+  // ---------- File attachments ----------
+  function getExtension(name) {
+    const idx = name.lastIndexOf('.');
+    return idx === -1 ? '' : name.slice(idx).toLowerCase();
+  }
+
+  function buildAttachmentChip(att, { removable }) {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip';
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = att.name;
+    name.title = att.name;
+
+    const size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = formatBytes(att.size);
+
+    chip.appendChild(name);
+    chip.appendChild(size);
+
+    if (removable) {
+      const remove = document.createElement('span');
+      remove.className = 'remove';
+      remove.textContent = '✕';
+      remove.title = 'Remove attachment';
+      remove.onclick = () => removePendingAttachment(att);
+      chip.appendChild(remove);
+    }
+
+    return chip;
+  }
+
+  function renderPendingAttachments() {
+    el.pendingAttachments.innerHTML = '';
+    for (const att of pendingAttachments) {
+      el.pendingAttachments.appendChild(buildAttachmentChip(att, { removable: true }));
+    }
+  }
+
+  function removePendingAttachment(att) {
+    pendingAttachments = pendingAttachments.filter((a) => a !== att);
+    renderPendingAttachments();
+  }
+
+  async function handleFileSelect(fileList) {
+    const files = Array.from(fileList || []);
+    for (const file of files) {
+      if (pendingAttachments.length >= ATTACHMENT_MAX_COUNT) {
+        showError(`You can attach at most ${ATTACHMENT_MAX_COUNT} files per message.`);
+        break;
+      }
+      const ext = getExtension(file.name);
+      if (!ATTACHMENT_EXTENSIONS.includes(ext)) {
+        showError(`"${file.name}" isn't a supported text file type.`);
+        continue;
+      }
+      if (file.size > ATTACHMENT_MAX_SIZE) {
+        showError(`"${file.name}" is ${formatBytes(file.size)}, which exceeds the ${formatBytes(ATTACHMENT_MAX_SIZE)} limit per file.`);
+        continue;
+      }
+      try {
+        const content = await file.text();
+        pendingAttachments.push({ name: file.name, content, size: file.size });
+      } catch (err) {
+        showError(`Failed to read "${file.name}": ${err.message}`);
+      }
+    }
+    renderPendingAttachments();
+  }
+
+  el.attachBtn?.addEventListener('click', () => el.fileInput.click());
+  el.fileInput?.addEventListener('change', () => {
+    handleFileSelect(el.fileInput.files);
+    el.fileInput.value = '';
+  });
+
   // ---------- Sending messages ----------
   function autoResizeTextarea() {
     el.promptInput.style.height = 'auto';
@@ -542,7 +647,13 @@
     saveSettings();
 
     updateTitleFromFirstMessage(chat, text);
-    chat.messages.push({ role: 'user', content: text });
+    const userMsg = { role: 'user', content: text };
+    if (pendingAttachments.length) {
+      userMsg.attachments = pendingAttachments.map((a) => ({ name: a.name, content: a.content, size: a.size }));
+    }
+    chat.messages.push(userMsg);
+    pendingAttachments = [];
+    renderPendingAttachments();
     saveChats();
     renderChatList();
     renderMessages();
@@ -560,7 +671,14 @@
       msgs.push({ role: 'system', content: settings.systemPrompt.trim() });
     }
     for (const m of chat.messages) {
-      msgs.push({ role: m.role, content: m.content });
+      let content = m.content;
+      if (m.attachments && m.attachments.length) {
+        const blocks = m.attachments
+          .map((a) => `[Attached file: ${a.name}]\n\`\`\`\n${a.content}\n\`\`\``)
+          .join('\n\n');
+        content = content ? `${content}\n\n${blocks}` : blocks;
+      }
+      msgs.push({ role: m.role, content });
     }
     return msgs;
   }
@@ -571,6 +689,7 @@
     const assistantMsg = { role: 'assistant', content: '', model: chat.model };
     chat.messages.push(assistantMsg);
     renderMessages();
+    markLastRowStreaming(true);
     setSending(true);
 
     abortController = new AbortController();
@@ -642,6 +761,7 @@
       saveChats();
     } finally {
       setSending(false);
+      markLastRowStreaming(false);
       abortController = null;
     }
   }
@@ -653,6 +773,13 @@
     const contentEl = lastRow.querySelector('.msg-content');
     if (contentEl) contentEl.innerHTML = renderMarkdown(text);
     scrollToBottom();
+  }
+
+  function markLastRowStreaming(on) {
+    const rows = el.messages.querySelectorAll('.msg-row');
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) return;
+    lastRow.classList.toggle('streaming', on);
   }
 
   function setSending(isSending) {
@@ -668,7 +795,15 @@
   function showError(message) {
     const banner = document.createElement('div');
     banner.className = 'error-banner';
-    banner.textContent = message;
+    banner.setAttribute('role', 'alert');
+    const icon = document.createElement('span');
+    icon.className = 'error-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '⚠';
+    const text = document.createElement('span');
+    text.textContent = message;
+    banner.appendChild(icon);
+    banner.appendChild(text);
     el.messages.appendChild(banner);
     scrollToBottom();
   }
@@ -689,6 +824,7 @@
   el.sidebarToggle.addEventListener('click', () => {
     sidebarCollapsed = !sidebarCollapsed;
     el.app.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+    el.sidebarToggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
   });
 
   el.refreshModelsBtn.addEventListener('click', loadModels);
@@ -703,6 +839,7 @@
     el.topPValue.textContent = settings.topP;
     el.numCtx.value = settings.numCtx;
     el.settingsOverlay.classList.remove('hidden');
+    el.closeSettingsBtn.focus();
   }
 
   function closeSettings() {
@@ -712,12 +849,18 @@
     settings.numCtx = Number(el.numCtx.value) || 4096;
     saveSettings();
     el.settingsOverlay.classList.add('hidden');
+    el.settingsBtn.focus();
   }
 
   el.settingsBtn.addEventListener('click', openSettings);
   el.closeSettingsBtn.addEventListener('click', closeSettings);
   el.settingsOverlay.addEventListener('click', (e) => {
     if (e.target === el.settingsOverlay) closeSettings();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !el.settingsOverlay.classList.contains('hidden')) {
+      closeSettings();
+    }
   });
   el.temperature.addEventListener('input', () => (el.tempValue.textContent = el.temperature.value));
   el.topP.addEventListener('input', () => (el.topPValue.textContent = el.topP.value));

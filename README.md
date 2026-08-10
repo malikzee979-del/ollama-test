@@ -159,13 +159,40 @@ COMPACTION_KEEP_RECENT=8     # number of most recent messages always kept verbat
 COMPACTION_MODEL=llama3      # model used for the summarization call itself (defaults to the request's model)
 ```
 
+## Attachments
+
+The composer's 📎 button lets you attach plain-text files to a message —
+supported extensions: `.txt .md .markdown .json .csv .tsv .log .js .ts .py
+.html .css .yaml .yml .xml .sh`. Files are read entirely client-side and
+folded into the prompt sent to Ollama as fenced `[Attached file: name]` blocks
+appended to your message content; nothing is uploaded to a server route.
+Limits: 200KB per file, 3 files per message. Attachments are stored alongside
+the rest of the chat in `localStorage`, so they persist across reloads like
+normal messages. Binary formats (PDF, DOCX, images, etc.) aren't supported.
+
 ## Model management
 
-The Settings modal lets you manage models without leaving the app:
+The Settings modal lets you manage models without leaving the app, organized
+into "Chat defaults", "Model management", and "Danger zone" sections:
 
 - **Pull a new model** — wired to `POST /api/pull`, which streams progress
   updates back to the UI as Ollama downloads the model.
 - **Delete an installed model** — wired to `DELETE /api/models/:name`.
+
+Press **Escape** or click outside the modal to close it; it also returns
+focus to the button that opened/closed it, for keyboard users.
+
+## Accessibility & keyboard use
+
+- All icon-only buttons (attach, refresh models, close settings, sidebar
+  toggle, stop) have `aria-label`s for screen readers.
+- Keyboard focus is always visible (a focus ring appears when tabbing,
+  hidden for mouse clicks).
+- **Enter** sends a message (Shift+Enter for a newline); **Escape** closes
+  the Settings modal; the model-pull field submits on **Enter** too.
+- While a response is streaming, an animated cursor and "typing" dots
+  indicate activity, and the **Stop** button is clearly labeled for
+  cancelling generation.
 
 ## Observability
 
