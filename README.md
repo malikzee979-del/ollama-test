@@ -39,6 +39,7 @@ Then open `http://localhost:4173` (or your chosen `PORT`) in a browser.
 | `/api/chat` | POST | Streaming chat proxy; forwards newline-delimited JSON chunks from Ollama as they arrive. Aborts the upstream request if the client disconnects. |
 | `/api/pull` | POST | Pulls a model with streaming progress; body: `{ name }`. Aborts the upstream pull if the client disconnects. |
 | `/api/models/:name` | DELETE | Deletes an installed model by name. |
+| `/api/metrics` | GET | Returns an in-memory observability snapshot (see [Observability](#observability)). |
 
 ## Memory-fit warning
 
@@ -57,3 +58,21 @@ The Settings modal lets you manage models without leaving the app:
 - **Pull a new model** — wired to `POST /api/pull`, which streams progress
   updates back to the UI as Ollama downloads the model.
 - **Delete an installed model** — wired to `DELETE /api/models/:name`.
+
+## Observability
+
+In keeping with the "thin proxy, minimal deps" approach, request logging and
+metrics are hand-rolled (`logger.js` / `metrics.js`) instead of pulling in
+winston/pino/morgan.
+
+- Every request gets a short random request id, returned as the
+  `X-Request-Id` response header.
+- On response finish, one structured, single-line log entry is printed to
+  stdout, e.g. `[2026-08-10T12:00:00.000Z] INFO GET /api/system 200 1.2ms id=a1b2c3d4e5f6`.
+  Only method, route, status, duration, and request id are logged — request
+  and response bodies (including chat content) are never logged.
+- `GET /api/metrics` returns an in-memory JSON snapshot: total request count,
+  total upstream Ollama error count (503s), per-route request counts broken
+  down by status code, average/min/max latency per route, process uptime,
+  and `process.memoryUsage()`. Metrics live only in memory and reset on
+  restart.
