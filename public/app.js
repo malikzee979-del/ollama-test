@@ -13,6 +13,15 @@
   let sidebarCollapsed = false;
   let systemInfo = null; // { totalMemory, freeMemory }
   let pullController = null;
+  let pendingAttachments = []; // [{ name, content, size }] staged for the next message
+
+  // ---------- Attachments ----------
+  const ATTACHMENT_EXTENSIONS = [
+    '.txt', '.md', '.markdown', '.json', '.csv', '.tsv', '.log',
+    '.js', '.ts', '.py', '.html', '.css', '.yaml', '.yml', '.xml', '.sh',
+  ];
+  const ATTACHMENT_MAX_SIZE = 200 * 1024; // 200KB per file
+  const ATTACHMENT_MAX_COUNT = 3; // per message
 
   // ---------- Elements ----------
   const el = {
@@ -52,6 +61,9 @@
     pullProgressFill: document.getElementById('pullProgressFill'),
     pullProgressText: document.getElementById('pullProgressText'),
     memoryWarning: document.getElementById('memoryWarning'),
+    fileInput: document.getElementById('fileInput'),
+    attachBtn: document.getElementById('attachBtn'),
+    pendingAttachments: document.getElementById('pendingAttachments'),
   };
 
   // ---------- Persistence ----------
@@ -257,6 +269,15 @@
 
     body.appendChild(role);
     body.appendChild(content);
+
+    if (msg.attachments && msg.attachments.length) {
+      const attachmentsRow = document.createElement('div');
+      attachmentsRow.className = 'msg-attachments';
+      for (const att of msg.attachments) {
+        attachmentsRow.appendChild(buildAttachmentChip(att, { removable: false }));
+      }
+      body.appendChild(attachmentsRow);
+    }
 
     if (msg.role === 'assistant' && msg.content) {
       const actions = document.createElement('div');
@@ -507,6 +528,84 @@
     }
   });
 
+  // ---------- File attachments ----------
+  function getExtension(name) {
+    const idx = name.lastIndexOf('.');
+    return idx === -1 ? '' : name.slice(idx).toLowerCase();
+  }
+
+  function buildAttachmentChip(att, { removable }) {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip';
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = att.name;
+    name.title = att.name;
+
+    const size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = formatBytes(att.size);
+
+    chip.appendChild(name);
+    chip.appendChild(size);
+
+    if (removable) {
+      const remove = document.createElement('span');
+      remove.className = 'remove';
+      remove.textContent = '✕';
+      remove.title = 'Remove attachment';
+      remove.onclick = () => removePendingAttachment(att);
+      chip.appendChild(remove);
+    }
+
+    return chip;
+  }
+
+  function renderPendingAttachments() {
+    el.pendingAttachments.innerHTML = '';
+    for (const att of pendingAttachments) {
+      el.pendingAttachments.appendChild(buildAttachmentChip(att, { removable: true }));
+    }
+  }
+
+  function removePendingAttachment(att) {
+    pendingAttachments = pendingAttachments.filter((a) => a !== att);
+    renderPendingAttachments();
+  }
+
+  async function handleFileSelect(fileList) {
+    const files = Array.from(fileList || []);
+    for (const file of files) {
+      if (pendingAttachments.length >= ATTACHMENT_MAX_COUNT) {
+        showError(`You can attach at most ${ATTACHMENT_MAX_COUNT} files per message.`);
+        break;
+      }
+      const ext = getExtension(file.name);
+      if (!ATTACHMENT_EXTENSIONS.includes(ext)) {
+        showError(`"${file.name}" isn't a supported text file type.`);
+        continue;
+      }
+      if (file.size > ATTACHMENT_MAX_SIZE) {
+        showError(`"${file.name}" is ${formatBytes(file.size)}, which exceeds the ${formatBytes(ATTACHMENT_MAX_SIZE)} limit per file.`);
+        continue;
+      }
+      try {
+        const content = await file.text();
+        pendingAttachments.push({ name: file.name, content, size: file.size });
+      } catch (err) {
+        showError(`Failed to read "${file.name}": ${err.message}`);
+      }
+    }
+    renderPendingAttachments();
+  }
+
+  el.attachBtn?.addEventListener('click', () => el.fileInput.click());
+  el.fileInput?.addEventListener('change', () => {
+    handleFileSelect(el.fileInput.files);
+    el.fileInput.value = '';
+  });
+
   // ---------- Sending messages ----------
   function autoResizeTextarea() {
     el.promptInput.style.height = 'auto';
@@ -542,7 +641,13 @@
     saveSettings();
 
     updateTitleFromFirstMessage(chat, text);
-    chat.messages.push({ role: 'user', content: text });
+    const userMsg = { role: 'user', content: text };
+    if (pendingAttachments.length) {
+      userMsg.attachments = pendingAttachments.map((a) => ({ name: a.name, content: a.content, size: a.size }));
+    }
+    chat.messages.push(userMsg);
+    pendingAttachments = [];
+    renderPendingAttachments();
     saveChats();
     renderChatList();
     renderMessages();
@@ -560,7 +665,14 @@
       msgs.push({ role: 'system', content: settings.systemPrompt.trim() });
     }
     for (const m of chat.messages) {
-      msgs.push({ role: m.role, content: m.content });
+      let content = m.content;
+      if (m.attachments && m.attachments.length) {
+        const blocks = m.attachments
+          .map((a) => `[Attached file: ${a.name}]\n\`\`\`\n${a.content}\n\`\`\``)
+          .join('\n\n');
+        content = content ? `${content}\n\n${blocks}` : blocks;
+      }
+      msgs.push({ role: m.role, content });
     }
     return msgs;
   }
