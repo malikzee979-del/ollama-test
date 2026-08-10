@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const os = require('os');
+const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 4173;
@@ -189,6 +190,86 @@ app.delete('/api/models/:name', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(503).json({ error: err.message });
+  }
+});
+
+// --- Chat history (local database) -----------------------------------
+// Server-side persistence for chat sessions, stored in a JSON file under
+// ./data/. This is separate from (and currently unused by) the frontend's
+// existing localStorage-based history; see README for details.
+
+// List sessions (summaries only — no messages).
+app.get('/api/sessions', (_req, res) => {
+  try {
+    res.json({ sessions: db.listSessions() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a new session.
+app.post('/api/sessions', (req, res) => {
+  const { title } = req.body || {};
+  if (title !== undefined && typeof title !== 'string') {
+    return res.status(400).json({ error: '"title" must be a string.' });
+  }
+  try {
+    const session = db.createSession(title);
+    res.status(201).json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get a single session, including its full messages.
+app.get('/api/sessions/:id', (req, res) => {
+  try {
+    const session = db.getSession(req.params.id);
+    if (!session) return res.status(404).json({ error: `No session with id "${req.params.id}".` });
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update a session's title and/or messages (replace or append).
+app.patch('/api/sessions/:id', (req, res) => {
+  const { title, messages, appendMessages } = req.body || {};
+
+  if (title !== undefined && typeof title !== 'string') {
+    return res.status(400).json({ error: '"title" must be a string.' });
+  }
+  if (messages !== undefined && !Array.isArray(messages)) {
+    return res.status(400).json({ error: '"messages" must be an array.' });
+  }
+  if (appendMessages !== undefined && !Array.isArray(appendMessages)) {
+    return res.status(400).json({ error: '"appendMessages" must be an array.' });
+  }
+  const isValidMessage = (m) => m && typeof m === 'object' && typeof m.role === 'string' && typeof m.content === 'string';
+  if (Array.isArray(messages) && !messages.every(isValidMessage)) {
+    return res.status(400).json({ error: 'Each item in "messages" must have string "role" and "content".' });
+  }
+  if (Array.isArray(appendMessages) && !appendMessages.every(isValidMessage)) {
+    return res.status(400).json({ error: 'Each item in "appendMessages" must have string "role" and "content".' });
+  }
+
+  try {
+    const session = db.updateSession(req.params.id, { title, messages, appendMessages });
+    if (!session) return res.status(404).json({ error: `No session with id "${req.params.id}".` });
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a session.
+app.delete('/api/sessions/:id', (req, res) => {
+  try {
+    const deleted = db.deleteSession(req.params.id);
+    if (!deleted) return res.status(404).json({ error: `No session with id "${req.params.id}".` });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
