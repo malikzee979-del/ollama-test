@@ -169,10 +169,12 @@
       title.className = 'title';
       title.textContent = chat.title;
 
-      const del = document.createElement('span');
+      const del = document.createElement('button');
+      del.type = 'button';
       del.className = 'del';
       del.textContent = '✕';
       del.title = 'Delete chat';
+      del.setAttribute('aria-label', `Delete chat "${chat.title}"`);
       del.onclick = (e) => deleteChat(chat.id, e);
 
       item.appendChild(title);
@@ -265,7 +267,11 @@
 
     const content = document.createElement('div');
     content.className = 'msg-content';
-    content.innerHTML = renderMarkdown(msg.content || '');
+    if (msg.role === 'assistant' && !msg.content) {
+      content.innerHTML = '<span class="typing-dots" role="status" aria-label="Assistant is typing"><span></span><span></span><span></span></span>';
+    } else {
+      content.innerHTML = renderMarkdown(msg.content || '');
+    }
 
     body.appendChild(role);
     body.appendChild(content);
@@ -683,6 +689,7 @@
     const assistantMsg = { role: 'assistant', content: '', model: chat.model };
     chat.messages.push(assistantMsg);
     renderMessages();
+    markLastRowStreaming(true);
     setSending(true);
 
     abortController = new AbortController();
@@ -754,6 +761,7 @@
       saveChats();
     } finally {
       setSending(false);
+      markLastRowStreaming(false);
       abortController = null;
     }
   }
@@ -765,6 +773,13 @@
     const contentEl = lastRow.querySelector('.msg-content');
     if (contentEl) contentEl.innerHTML = renderMarkdown(text);
     scrollToBottom();
+  }
+
+  function markLastRowStreaming(on) {
+    const rows = el.messages.querySelectorAll('.msg-row');
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) return;
+    lastRow.classList.toggle('streaming', on);
   }
 
   function setSending(isSending) {
@@ -780,7 +795,15 @@
   function showError(message) {
     const banner = document.createElement('div');
     banner.className = 'error-banner';
-    banner.textContent = message;
+    banner.setAttribute('role', 'alert');
+    const icon = document.createElement('span');
+    icon.className = 'error-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '⚠';
+    const text = document.createElement('span');
+    text.textContent = message;
+    banner.appendChild(icon);
+    banner.appendChild(text);
     el.messages.appendChild(banner);
     scrollToBottom();
   }
@@ -801,6 +824,7 @@
   el.sidebarToggle.addEventListener('click', () => {
     sidebarCollapsed = !sidebarCollapsed;
     el.app.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+    el.sidebarToggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
   });
 
   el.refreshModelsBtn.addEventListener('click', loadModels);
@@ -815,6 +839,7 @@
     el.topPValue.textContent = settings.topP;
     el.numCtx.value = settings.numCtx;
     el.settingsOverlay.classList.remove('hidden');
+    el.closeSettingsBtn.focus();
   }
 
   function closeSettings() {
@@ -824,12 +849,18 @@
     settings.numCtx = Number(el.numCtx.value) || 4096;
     saveSettings();
     el.settingsOverlay.classList.add('hidden');
+    el.settingsBtn.focus();
   }
 
   el.settingsBtn.addEventListener('click', openSettings);
   el.closeSettingsBtn.addEventListener('click', closeSettings);
   el.settingsOverlay.addEventListener('click', (e) => {
     if (e.target === el.settingsOverlay) closeSettings();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !el.settingsOverlay.classList.contains('hidden')) {
+      closeSettings();
+    }
   });
   el.temperature.addEventListener('input', () => (el.tempValue.textContent = el.temperature.value));
   el.topP.addEventListener('input', () => (el.topPValue.textContent = el.topP.value));

@@ -25,13 +25,14 @@
       </div>
     </aside>
 
-    <button id="sidebarToggle" class="sidebar-toggle" title="Toggle sidebar">☰</button>
+    <button id="sidebarToggle" class="sidebar-toggle" title="Toggle sidebar" aria-label="Toggle sidebar" aria-expanded="true" aria-controls="sidebar">☰</button>
 
     <main class="main">
       <header class="topbar">
         <div class="model-picker">
+          <label class="visually-hidden" for="modelSelect">Choose a model</label>
           <select id="modelSelect" title="Choose a model"></select>
-          <button id="refreshModelsBtn" class="icon-btn" title="Refresh models">⟳</button>
+          <button id="refreshModelsBtn" class="icon-btn" title="Refresh models" aria-label="Refresh models">⟳</button>
         </div>
         <div class="topbar-title" id="chatTitle">New chat</div>
         <div class="topbar-actions">
@@ -39,9 +40,9 @@
         </div>
       </header>
 
-      <section id="messages" class="messages">
+      <section id="messages" class="messages" aria-live="polite" aria-relevant="additions">
         <div class="empty-state" id="emptyState">
-          <div class="empty-emoji">🦙</div>
+          <div class="empty-emoji" aria-hidden="true">🦙</div>
           <h1>Ollama Chat</h1>
           <p>Chat with your local models. Nothing leaves your machine.</p>
           <div id="emptyModelHint" class="empty-hint"></div>
@@ -55,63 +56,76 @@
       <form id="composer" class="composer">
         <input type="file" id="fileInput" class="visually-hidden" multiple
           accept=".txt,.md,.markdown,.json,.csv,.tsv,.log,.js,.ts,.py,.html,.css,.yaml,.yml,.xml,.sh" />
-        <button type="button" id="attachBtn" class="icon-btn" title="Attach text file(s)">📎</button>
+        <button type="button" id="attachBtn" class="icon-btn" title="Attach text file(s)" aria-label="Attach text file(s)">📎</button>
+        <label class="visually-hidden" for="promptInput">Message your local model</label>
         <textarea id="promptInput" rows="1" placeholder="Message your local model…" autofocus></textarea>
         <button type="submit" id="sendBtn" class="btn btn-primary send-btn">Send</button>
-        <button type="button" id="stopBtn" class="btn btn-danger send-btn hidden">Stop</button>
+        <button type="button" id="stopBtn" class="btn btn-danger send-btn hidden" title="Stop generating" aria-label="Stop generating">
+          <span class="stop-icon" aria-hidden="true">◼</span> Stop
+        </button>
       </form>
       <div class="composer-hint">Enter to send · Shift+Enter for new line · 📎 attach up to 3 text files (200KB each)</div>
     </main>
   </div>
 
   <div id="settingsOverlay" class="overlay hidden">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-header">
-        <h2>Settings</h2>
-        <button id="closeSettingsBtn" class="icon-btn">✕</button>
+        <h2 id="settingsTitle">Settings</h2>
+        <button id="closeSettingsBtn" class="icon-btn" title="Close settings" aria-label="Close settings">✕</button>
       </div>
       <div class="modal-body">
-        <label class="field">
-          <span>Ollama server</span>
-          <input id="ollamaHostDisplay" type="text" disabled />
-          <small>Set the <code>OLLAMA_HOST</code> env var before starting the server to change this.</small>
-        </label>
-        <label class="field">
-          <span>System prompt</span>
-          <textarea id="systemPrompt" rows="3" placeholder="You are a helpful assistant."></textarea>
-        </label>
-        <label class="field">
-          <span>Temperature: <span id="tempValue">0.8</span></span>
-          <input id="temperature" type="range" min="0" max="2" step="0.05" value="0.8" />
-        </label>
-        <label class="field">
-          <span>Top P: <span id="topPValue">0.9</span></span>
-          <input id="topP" type="range" min="0" max="1" step="0.05" value="0.9" />
-        </label>
-        <label class="field">
-          <span>Context window (num_ctx)</span>
-          <input id="numCtx" type="number" min="512" step="512" value="4096" />
-        </label>
-
-        <div class="field">
-          <span>Installed models</span>
-          <div id="installedModelsList" class="model-manage-list"></div>
+        <div class="modal-section">
+          <h3 class="modal-section-title">Chat defaults</h3>
+          <label class="field">
+            <span>Ollama server</span>
+            <input id="ollamaHostDisplay" type="text" disabled />
+            <small>Set the <code>OLLAMA_HOST</code> env var before starting the server to change this.</small>
+          </label>
+          <label class="field">
+            <span>System prompt</span>
+            <textarea id="systemPrompt" rows="3" placeholder="You are a helpful assistant."></textarea>
+          </label>
+          <label class="field">
+            <span>Temperature: <span id="tempValue">0.8</span></span>
+            <input id="temperature" type="range" min="0" max="2" step="0.05" value="0.8" />
+          </label>
+          <label class="field">
+            <span>Top P: <span id="topPValue">0.9</span></span>
+            <input id="topP" type="range" min="0" max="1" step="0.05" value="0.9" />
+          </label>
+          <label class="field">
+            <span>Context window (num_ctx)</span>
+            <input id="numCtx" type="number" min="512" step="512" value="4096" />
+          </label>
         </div>
 
-        <div class="field">
-          <span>Pull a model</span>
-          <div class="pull-row">
-            <input id="pullModelInput" type="text" placeholder="e.g. llama3.1:8b" />
-            <button id="pullModelBtn" class="btn btn-ghost">Pull</button>
+        <div class="modal-section">
+          <h3 class="modal-section-title">Model management</h3>
+          <div class="field">
+            <span>Installed models</span>
+            <div id="installedModelsList" class="model-manage-list"></div>
           </div>
-          <div id="pullProgress" class="pull-progress hidden" role="status" aria-live="polite">
-            <div class="pull-progress-bar"><div id="pullProgressFill" class="pull-progress-fill"></div></div>
-            <small id="pullProgressText"></small>
+
+          <div class="field">
+            <span>Pull a model</span>
+            <div class="pull-row">
+              <label class="visually-hidden" for="pullModelInput">Model name to pull</label>
+              <input id="pullModelInput" type="text" placeholder="e.g. llama3.1:8b" />
+              <button id="pullModelBtn" class="btn btn-ghost">Pull</button>
+            </div>
+            <div id="pullProgress" class="pull-progress hidden" role="status" aria-live="polite">
+              <div class="pull-progress-bar"><div id="pullProgressFill" class="pull-progress-fill"></div></div>
+              <small id="pullProgressText"></small>
+            </div>
           </div>
         </div>
 
-        <div class="field-row">
-          <button id="deleteAllBtn" class="btn btn-danger">Delete all chats</button>
+        <div class="modal-section">
+          <h3 class="modal-section-title">Danger zone</h3>
+          <div class="field-row">
+            <button id="deleteAllBtn" class="btn btn-danger">Delete all chats</button>
+          </div>
         </div>
       </div>
     </div>
