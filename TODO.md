@@ -1,6 +1,6 @@
 # Project TODO — Ollama Chat
 
-The **single living backlog** for this repo. Health re-verified **2026-09-21**
+The **single living backlog** for this repo. Health re-verified **2026-10-03**
 against a live run of `npm test`, `npm run lint`, `npm audit`, `git ls-files`
 and `git check-ignore -v`. The satellite read-through behind Phase 3 is still
 the **2026-09-14** one and was not re-audited.
@@ -23,13 +23,13 @@ If you add work, add it here. Don't start a fourth plan.
 
 | Check | Result |
 | --- | --- |
-| `npm test` | **Green** — 70/70 (`node --test`, 8 suites, ~2.5s) |
+| `npm test` | **Green** — 84/84 (`node --test`, 9 suites, ~2.5s) |
 | `npm run lint` | **Green** — exit 0, 0 problems (fixed 2026-09-09 in `eslint.config.js`) |
-| `npm audit --omit=dev` | **3 moderate** — `qs@6.15.3` under `express@4.22.2 → body-parser@1.20.6`. Now **two** advisories, not one: array-limit bypass (GHSA-x5fp-wj9c-mxmx) + `isBuffer` DoS (GHSA-4mjr-xmp4-gh2g). See 2.1 |
+| `npm audit --omit=dev` | **0 vulnerabilities** — cleared 2026-10-03 via an `undici: ^7.29.1` override (the `@qdrant/js-client-rest@1.19.0` pin dragged in a vulnerable undici); `qs` already resolves to 6.16.0. See 2.1 |
 | `npm audit` (incl. dev) | **17 total — 1 critical, 13 high, 3 moderate.** Critical is `tar <=7.5.20`; the dev-side set is all in the `electron-builder 25.1.8` tree. See 2.6 |
-| CI | **None** — no `.github/`; tests and lint run only when someone remembers |
-| Git | **Only 14 files tracked, and 10 of those have uncommitted modifications.** The committed tree does not run — tracked `server.js` requires the untracked `./auth`. **This is the single biggest risk in the project.** See Phase 0 |
-| `.gitignore` | **Weaker than previously documented.** Root file is 10 lines; `scratchpad/` (1.3G) is *not* ignored, and the ignores covering `.pixis/`, `unity/LocalTheftAuto/Library` and `mobile/build` live in **nested, untracked** `.gitignore` files that a fresh clone would not have. See 0.1 |
+| CI | **Active** — `.github/workflows/ci.yml` (Node 22, npm ci, lint, test), committed 2026-10-03. Audit gate still to add (1.2) |
+| Git | **Healthy** — committed in chunks 2026-10-03 (404 files tracked; core, electron, docs+CI, satellites). Fresh-clone `npm ci && npm test` verified green. See Phase 0 |
+| `.gitignore` | **Hardened** — root file now covers `scratchpad/`, `.idea/`, `.vscode/`, `.pixis/`, the root binaries, and `.DS_Store` (2026-10-03) |
 | Satellites | `python_app` has four real behavioural defects and zero tests; `mobile/` renders a retired design. See Phase 3 *(from the 2026-09-14 read-through; not re-verified)* |
 
 Both quality gates are green, which means **CI is now a pure win** — it no
@@ -48,7 +48,7 @@ runtime — a fresh clone cannot start), all of `test/`, `eslint.config.js`,
 Meanwhile ~4GB of build artifacts (`unity/.../Library` 1.7G, `scratchpad` 1.3G,
 `mobile/build` 1.1G) are *not* ignored and are one `git add .` away.
 
-- [ ] **0.1 Harden the root `.gitignore`.** Verified 2026-09-21 with
+- [x] **0.1 Harden the root `.gitignore`** (done 2026-10-03). Verified 2026-09-21 with
       `git check-ignore -v`: the root file is only **10 lines** (`node_modules/`,
       `.env`, `.env.local`, `*.log`, `.DS_Store`, `data/`, four `python_app/`
       entries, `.nicegui/`). Add `scratchpad/`, `.idea/`, `.vscode/`,
@@ -64,14 +64,22 @@ Meanwhile ~4GB of build artifacts (`unity/.../Library` 1.7G, `scratchpad` 1.3G,
         themselves untracked** (`.pixis/.gitignore:1`,
         `unity/LocalTheftAuto/.gitignore:2`, `mobile/.gitignore:33`). A fresh
         clone gets none of them, so ~4GB of artifacts comes back. Hoist the
-        load-bearing patterns into the root file here, and commit the nested
-        files in 0.3.
-- [ ] **0.2 Decide the home of the loose root binaries.** `gameplay.webm`
+      load-bearing patterns into the root file here, and commit the nested
+      files in 0.3. Landed: root file now covers `scratchpad/`, `.idea/`,
+      `.vscode/`, `.pixis/`, the root binaries, and `.DS_Store`; the nested
+      `.gitignore` files shipped with their satellites in 0.3. The `.vscode/`
+      settings file stays untracked by choice.
+- [x] **0.2 Decide the home of the loose root binaries** (decided 2026-10-03:
+      ignored in place; relocation to `marketing/` deferred — see 5.2-style
+      cleanup). `gameplay.webm`
       (4.7MB) and `busy_cyberworld_0.mp3` (460KB) most likely belong under
       `marketing/` as game assets — move them there, or ignore them.
       `PROJECT-overview.pdf` is generated output — ignore or delete.
       All three confirmed still untracked and un-ignored as of 2026-09-21.
-- [ ] **0.3 Commit the working tree** in logical chunks: core app + tests;
+      Now ignored (`/gameplay.webm`, `/busy_cyberworld_0.mp3`); the generated
+      `PROJECT-overview.pdf` stays untracked pending deletion.
+- [x] **0.3 Commit the working tree** (done 2026-10-03, owner-approved) in
+      logical chunks: core app + tests;
       electron; mobile clients; marketing; unity; python_app; docs.
       Note that 10 of the 14 tracked files also **differ from HEAD**
       (`.gitignore`, `README.md`, `db.js`, `package.json`,
@@ -80,22 +88,25 @@ Meanwhile ~4GB of build artifacts (`unity/.../Library` 1.7G, `scratchpad` 1.3G,
       part of the tree is stale — this is a "commit everything", not just a
       "add the missing files".
       **Requires explicit owner sign-off — `AGENTS.md` forbids autonomous
-      commits.** This is a recommendation, not an autonomous action.
-- [ ] **0.4 Verify the clone.** `git clone` into a temp dir, then
+      commits.** This is a recommendation, not an autonomous action. Four
+      chunks landed: core+tests, electron, docs+CI, satellites (404 files).
+- [x] **0.4 Verify the clone** (verified 2026-10-03, 75/75 then; suite has
+      since grown to 84). `git clone` into a temp dir, then
       `npm ci && npm test` there. This is the only real proof Phase 0 worked.
 
 Effort: **S**. The only true blocker in this plan.
 
 ## Phase 1 — CI (now unblocked; do immediately after Phase 0)
 
-- [ ] **1.1 Add `.github/workflows/ci.yml`.** Node 22 (matches
+- [x] **1.1 Add `.github/workflows/ci.yml`** (existed untracked; committed
+      2026-10-03 in the docs+CI chunk). Node 22 (matches
       `engines >=22.5.0` and the `node:sqlite` requirement), then `npm ci`,
       `npm test`, `npm run lint`. The suite is hermetic by design — temp
       `AUTH_DB_FILE`/`SESSIONS_DATA_FILE`, fake Ollama, fake Qdrant client —
       so no external services are needed.
-- [ ] **1.2 Add an audit gate, but only after 2.1 lands.**
-      `npm audit --omit=dev --audit-level=high` would fail today on the `qs`
-      advisory, so sequence it second or CI is red on day one.
+- [ ] **1.2 Add an audit gate — now unblocked: `npm audit --omit=dev` is
+      clean as of 2026-10-03.** `npm audit --omit=dev --audit-level=high`
+      as a second CI job.
 - [ ] **Verify:** push a branch, watch the workflow pass.
 
 Effort: **XS**. Converts a manual habit into an enforced invariant.
@@ -105,31 +116,32 @@ Effort: **XS**. Converts a manual habit into an enforced invariant.
 All small, all testable against existing harnesses (`test/server.test.js`
 signup-then-cookie pattern; `test/server-streaming.test.js` fake Ollama).
 
-- [ ] **2.1 Close the production `qs` advisory without leaving Express 4.**
-      Add `"overrides": { "qs": "^6.16.0" }` to `package.json`, then
-      `npm install` to refresh the lockfile. Installed tree confirmed
-      2026-09-21: `express@4.22.2 → body-parser@1.20.6 → qs@6.15.3` (plus a
-      direct `qs@6.15.3` under express). **Two** advisories apply to that
-      range now — GHSA-x5fp-wj9c-mxmx (array-limit bypass via bracket-key
-      comma parsing) and GHSA-4mjr-xmp4-gh2g (`isBuffer` DoS).
-      **Re-check the "cannot reach it" claim before acting:** `npm audit`
-      now reports `fix available via npm audit fix` for the `--omit=dev` set,
-      where the 2026-09-06 dry-run said it could not be fixed. Either way the
-      override is the safe route — it pins the floor explicitly instead of
-      depending on npm's resolver.
+- [x] **2.1 Close the production advisories without leaving Express 4**
+      (done 2026-10-03, but the fix turned out to be `undici`, not `qs`):
+      `qs` already resolved to 6.16.0 via `express@4.22.3 → body-parser`,
+      so no qs override was needed. The runtime advisories were ten undici
+      ones (1 high + 1 moderate) dragged in by `@qdrant/js-client-rest@1.19.0`
+      pinning `undici@7.29.0`; cleared with `"overrides": { "undici":
+      "^7.29.1" }` (first fixed patch release) rather than the audit's
+      `--force` path of downgrading the qdrant client to the API-breaking
+      1.18.0. `npm audit --omit=dev` → 0.
       **Deliberately stay on Express 4:** Express 5 removed array path routes,
       and `server.js:231` uses `app.get(['/', '/index.html'], ...)`. Revisit at
       4.x EOL.
-- [ ] **2.2 Fix `parseCookies` (`server.js:110`).** Unguarded
+- [x] **2.2 Fix `parseCookies` (`server.js:110`)** (done 2026-10-03 with
+      regression test). Unguarded
       `decodeURIComponent` throws `URIError` on malformed cookies (`sid=%`).
       That middleware runs on *every* request, so a crafted cookie is a remote
       500. Reproduced 2026-09-06. Wrap the decode in try/catch, skip malformed
       values, **add a regression test**.
-- [ ] **2.3 Evict stale IPs from the rate-limiter `hits` Map
-      (`server.js:163`).** It filters timestamps but never deletes IP keys, so
-      it grows unbounded. One-line fix inside `rateLimiter`, which is already
-      shared by all four limiters.
-- [ ] **2.4 Add a Host-header guard.** Any browser on the LAN — or a malicious
+- [x] **2.3 Evict stale IPs from the rate-limiter `hits` Map**
+      (done 2026-10-03 with test). The "one-line" delete-on-empty idea was a
+      no-op — the triggering request immediately re-adds the key — so the fix
+      is an opportunistic sweep, at most once per window, inside
+      `rateLimiter` (shared by all four limiters).
+- [x] **2.4 Add a Host-header guard** (done 2026-10-03 with tests and README
+      Security-posture documentation; `test/server-host-guard.test.js` covers
+      the allowlist). Any browser on the LAN — or a malicious
       web page via DNS rebinding — can hit cookie-authenticated endpoints.
       Reject unless `Host` is loopback (`localhost`, `127.0.0.1`, `[::1]`) or
       listed in a new `HOST_ALLOWLIST` env (comma-separated). ~15 lines, one
@@ -137,7 +149,8 @@ signup-then-cookie pattern; `test/server-streaming.test.js` fake Ollama).
       dependency. **Document `HOST_ALLOWLIST` in the README Security-posture
       section in the same change**, since the default will surprise anyone
       serving the app on a LAN IP.
-- [ ] **2.5 Validate `/api/chat` message shape.** `messages` is only checked to
+- [x] **2.5 Validate `/api/chat` message shape** (done 2026-10-03 with
+      regression tests; the predicate is now hoisted to module scope). `messages` is only checked to
       be an array; reuse the `isValidMessage` predicate already at
       `server.js:509` for clean 400s instead of opaque upstream errors.
 - [ ] **2.6 Upgrade `electron-builder` 25 → 26.** Clears the **critical** `tar`
@@ -280,12 +293,15 @@ source behind a confirm banner.
       `/api/memory/index` path. **Fail open** in its own try/catch with a
       timeout like `COMPACTION_TIMEOUT_MS` — a Qdrant outage must never break
       normal chat. (`PLAN.md` C4)
-- [ ] **4.2 Regenerate / edit a message.** Truncate `chat.messages` and re-call
+- [x] **4.2 Regenerate / edit a message** (landed — `public/app.js`
+      `regenerateMessage`, linear-history truncate-and-replay).
+      Truncate `chat.messages` and re-call
       the existing `streamAssistantReply`; persist via `PATCH .../:id` with a
       full `messages` replace. **Linear history only** — true branching is a
       `db.js` schema change and explicitly out of scope. Check the interaction
       with attachments (regenerate must resend the same bytes). (`PLAN.md` C1)
-- [ ] **4.3 Export chat as Markdown / JSON.** Frontend-only, least coupled of
+- [x] **4.3 Export chat as Markdown / JSON** (landed — `public/app.js`
+      `chatToMarkdown` / `chatToJson`). Frontend-only, least coupled of
       the Phase 4 items, so it can jump the queue. Blob + `<a download>`, no new
       dependency; Markdown reuses the existing `[Attached file: ...]` fenced
       format. (`PLAN.md` C2)
@@ -342,7 +358,7 @@ source behind a confirm banner.
       actions (any logged-in user can `DELETE /api/models/:name` today —
       documented, but the dialog is cheap); surface the attachment limits
       in-app (plain-text-only, 200KB / 3 files — currently README-only);
-      `X-Compacted: true` response header when `compactMessages()` actually
+      **landed 2026-09 (see Done):** the `X-Compacted: true` response header when `compactMessages()` actually
       changed the array, plus a subtle "earlier turns were summarized" note
       instead of fully silent compaction; a context-window meter using the
       exported `chars/4 ≈ tokens` heuristic against `settings.numCtx`; review
@@ -440,6 +456,16 @@ are gated on Decisions A and B.
       (commit `df636e6`); the old code aborted every request immediately.
 - [x] ChatGPT-style design system in `public/style.css`, mirrored by
       `mobile-rn/src/theme/design.ts`.
+- [x] **Phase 0 + Phase 2 landed 2026-10-03** (owner-approved): working tree
+      committed in four chunks (404 files) with fresh-clone verification;
+      `.gitignore` hardened; host guard + `HOST_ALLOWLIST`;
+      `parseCookies` try/catch; rate-limiter sweep; `/api/chat` message-shape
+      validation; `undici ^7.29.1` override → `npm audit --omit=dev` clean.
+      Suite at 84/84 (9 suites), including the new
+      `test/server-host-guard.test.js`.
+- [x] **4.2 Regenerate/edit, 4.3 Markdown/JSON export, 5.4 compaction
+      surfacing** — landed prior to the 2026-10-03 reconciliation; previously
+      listed as open in error.
 - [x] README documents every satellite project (mobile, mobile-rn, python_app,
       marketing, unity) with a repository-layout table — the old "not mentioned
       in README" item is obsolete.
