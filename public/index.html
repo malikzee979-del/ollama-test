@@ -157,6 +157,10 @@
             <span>Context window (num_ctx)</span>
             <input id="numCtx" type="number" min="512" step="512" value="4096" />
           </label>
+          <label class="field">
+            <span class="checkbox-row"><input id="useMemory" type="checkbox" /> Semantic memory</span>
+            <small>Retrieve relevant excerpts from your past chats and include them as context. Requires Qdrant and an embedding model (nomic-embed-text by default); fails silently to plain chat if unavailable.</small>
+          </label>
         </div>
 
         <div class="modal-section">

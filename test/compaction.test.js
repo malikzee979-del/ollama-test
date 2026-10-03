@@ -178,3 +178,44 @@ test('estimateTokens returns 0 for unrecognized input', () => {
   assert.equal(estimateTokens(undefined), 0);
   assert.equal(estimateTokens(42), 0);
 });
+
+// --- injected memory messages (RAG) ---------------------------------------
+//
+// server.js injects a `[retrieved-memory]` system message into the outgoing
+// messages array — either at index 0, or right after a leading
+// compacted-summary marker. These tests pin the interaction contract: the
+// memory message must never be mistaken for the compaction marker, and a
+// later compaction pass must still find the real summary and keep the
+// memory message (which sits before the marker) untouched.
+
+test('compactMessages finds the marker when a memory message precedes it', async () => {
+  const memory = { role: 'system', content: '[retrieved-memory] Relevant excerpts:\n- the user likes blue' };
+  const summary = { role: 'system', content: `${MARKER} a summary of earlier turns` };
+  const messages = [
+    memory,
+    summary,
+    ...Array.from({ length: 50 }, (_, i) => msg(i % 2 === 0 ? 'user' : 'assistant', `turn ${i}`)),
+  ];
+
+  const result = await compactMessages({ messages, summarize: async () => 'a newer summary' });
+
+  // The compaction pass must find the REAL marker (index 1), not the memory
+  // message (index 0), and fold everything after it — including future
+  // re-injected memory — correctly.
+  assert.equal(result[0].content.startsWith(MARKER), true, 'the summary must stay first');
+  assert.match(result[0].content, /a newer summary/);
+  // The memory message sat before the marker, so it must never be
+  // re-summarized into the summary text.
+  assert.doesNotMatch(result[0].content, /the user likes blue/);
+});
+
+test('compactMessages never summarizes a trailing memory-only conversation', async () => {
+  // A fresh conversation that is just [memory, user] is under every limit
+  // anyway; this guards the shape server.js injects on a short chat.
+  const messages = [
+    { role: 'system', content: '[retrieved-memory] Relevant excerpts:\n- the user likes blue' },
+    msg('user', 'hello'),
+  ];
+  const result = await compactMessages({ messages, summarize: async () => 'should not run' });
+  assert.equal(result, messages);
+});

@@ -85,6 +85,7 @@
     topP: document.getElementById('topP'),
     topPValue: document.getElementById('topPValue'),
     numCtx: document.getElementById('numCtx'),
+    useMemory: document.getElementById('useMemory'),
     deleteAllBtn: document.getElementById('deleteAllBtn'),
     installedModelsList: document.getElementById('installedModelsList'),
     pullModelInput: document.getElementById('pullModelInput'),
@@ -150,7 +151,7 @@
   }
 
   function defaultSettings() {
-    return { systemPrompt: '', temperature: 0.8, topP: 0.9, numCtx: 4096, lastModel: '' };
+    return { systemPrompt: '', temperature: 0.8, topP: 0.9, numCtx: 4096, useMemory: false, lastModel: '' };
   }
 
   function saveSettings() {
@@ -1069,6 +1070,7 @@
             top_p: settings.topP,
             num_ctx: settings.numCtx,
           },
+          useMemory: settings.useMemory === true,
         }),
       });
 
@@ -1410,6 +1412,7 @@
     el.topP.value = settings.topP;
     el.topPValue.textContent = settings.topP;
     el.numCtx.value = settings.numCtx;
+    el.useMemory.checked = settings.useMemory === true;
     el.settingsOverlay.classList.remove('hidden');
     el.closeSettingsBtn.focus();
   }
@@ -1419,6 +1422,7 @@
     settings.temperature = Number(el.temperature.value);
     settings.topP = Number(el.topP.value);
     settings.numCtx = Number(el.numCtx.value) || 4096;
+    settings.useMemory = el.useMemory.checked;
     saveSettings();
     // numCtx is the meter's denominator, so it can change here.
     updateContextMeter();

@@ -7,7 +7,7 @@ const logger = require('./logger');
 const metrics = require('./metrics');
 const qdrant = require('./qdrant');
 const embeddings = require('./embeddings');
-const { compactMessages, DEFAULTS: COMPACTION_DEFAULTS } = require('./compaction');
+const { compactMessages, DEFAULTS: COMPACTION_DEFAULTS, MARKER: COMPACTION_MARKER } = require('./compaction');
 
 const app = express();
 const PORT = process.env.PORT || 4173;
@@ -55,6 +55,14 @@ const MAX_MESSAGE_CONTENT_CHARS = 1000000;
 // Batch/size caps for /api/memory/index.
 const MAX_MEMORY_BATCH = 100;
 const MAX_MEMORY_TEXT_CHARS = 100000;
+
+// Semantic-memory retrieval for /api/chat, behind the opt-in `useMemory`
+// request flag. Top-k excerpts are injected as one system message and the
+// completed turn is auto-indexed afterwards; both paths fail open (see
+// /api/chat below) so a Qdrant/embeddings outage never breaks normal chat.
+const MEMORY_TOP_K = Number(process.env.MEMORY_TOP_K) || 5;
+const MEMORY_TIMEOUT_MS = Number(process.env.MEMORY_TIMEOUT_MS) || 3000;
+const MEMORY_MARKER = '[retrieved-memory]';
 
 // Ollama's non-streaming summarization call (below) has no inherent
 // timeout; without one, a hung Ollama would stall the otherwise-streaming
@@ -375,8 +383,47 @@ app.post('/api/show', async (req, res) => {
 // message must carry a string "role" and a string "content".
 const isValidMessage = (m) => m && typeof m === 'object' && typeof m.role === 'string' && typeof m.content === 'string';
 
+// Race a memory retrieval promise against MEMORY_TIMEOUT_MS. Neither
+// embeddings.embed nor qdrant.searchByVector accepts an abort signal, so
+// the timeout here only bounds how long /api/chat waits — a hung call is
+// simply ignored rather than cancelled.
+async function raceWithMemoryTimeout(promise) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Memory retrieval timed out after ${MEMORY_TIMEOUT_MS}ms`)),
+          MEMORY_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Inject a memory system message into the outgoing messages array. If a
+// compacted-summary message leads the array, the memory goes right after it
+// so the summary stays first; compaction.js's marker scan runs from the end
+// and only recognizes its own MARKER prefix, so the memory message never
+// displaces or shadows an existing summary either way.
+function injectMemoryMessage(messages, memoryContent) {
+  const memoryMessage = { role: 'system', content: memoryContent };
+  if (
+    messages.length > 0 &&
+    messages[0].role === 'system' &&
+    typeof messages[0].content === 'string' &&
+    messages[0].content.startsWith(COMPACTION_MARKER)
+  ) {
+    return [messages[0], memoryMessage, ...messages.slice(1)];
+  }
+  return [memoryMessage, ...messages];
+}
+
 app.post('/api/chat', async (req, res) => {
-  const { model, messages, options, keep_alive } = req.body || {};
+  const { model, messages, options, keep_alive, useMemory } = req.body || {};
 
   if (!model) return res.status(400).json({ error: 'Missing "model" in request body.' });
   if (!Array.isArray(messages)) return res.status(400).json({ error: '"messages" must be an array.' });
@@ -403,6 +450,37 @@ app.post('/api/chat', async (req, res) => {
   // earlier context was summarized rather than silently dropped.
   const wasCompacted = compactedMessages !== messages;
 
+  // Opt-in semantic memory retrieval (useMemory). Embed the latest user
+  // message, search this user's indexed memory, and inject the top-k
+  // excerpts as one system message. Entirely fail-open, mirroring
+  // compaction: any retrieval failure — Qdrant down, embeddings model
+  // missing, timeout — is logged and the chat proceeds without memory.
+  let messagesToSend = compactedMessages;
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user' && m.content.trim());
+  if (useMemory === true && req.user && lastUser) {
+    try {
+      const results = await raceWithMemoryTimeout((async () => {
+        const vector = await embeddings.embed(lastUser.content);
+        return qdrant.searchByVector(vector, {
+          limit: MEMORY_TOP_K,
+          filter: { must: [{ key: 'userId', match: { value: req.user.id } }] },
+        });
+      })());
+      const excerpts = (Array.isArray(results) ? results : [])
+        .map((r) => r && r.payload && r.payload.text)
+        .filter((t) => typeof t === 'string' && t.trim())
+        .map((t) => `- ${t.length > 2000 ? `${t.slice(0, 2000)}…` : t}`);
+      if (excerpts.length > 0) {
+        const memoryContent = `${MEMORY_MARKER} Earlier messages from this user's past chats that look relevant `
+          + 'to the latest question (semantic search; may be imperfect):\n'
+          + excerpts.join('\n');
+        messagesToSend = injectMemoryMessage(messagesToSend, memoryContent);
+      }
+    } catch (err) {
+      console.warn('[memory] retrieval failed, continuing without memory:', err && err.message ? err.message : err);
+    }
+  }
+
   // Tied to the client connection: if the browser aborts (Stop button, tab
   // close, network drop), this immediately tears down the upstream request
   // to Ollama too, instead of leaving it to generate in the background where
@@ -415,7 +493,7 @@ app.post('/api/chat', async (req, res) => {
     upstream = await fetch(`${OLLAMA_HOST}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: compactedMessages, options, keep_alive, stream: true }),
+      body: JSON.stringify({ model, messages: messagesToSend, options, keep_alive, stream: true }),
       signal: upstreamController.signal,
     });
   } catch (err) {
@@ -440,15 +518,48 @@ app.post('/api/chat', async (req, res) => {
   const reader = upstream.body.getReader();
   res.on('close', () => reader.cancel().catch(() => {}));
 
+  // When useMemory is on, accumulate the assistant's reply from the ndjson
+  // stream (parse errors are ignored — indexing is best-effort) so the
+  // completed turn can be auto-indexed below, exactly like a manual
+  // /api/memory/index call would.
+  const memoryDecoder = useMemory === true ? new TextDecoder() : null;
+  let ndjsonBuffer = '';
+  let assistantText = '';
+  const autoIndexCompletedTurn = () => {
+    if (useMemory !== true || !req.user) return;
+    const items = [{ text: lastUser.content, metadata: { role: 'user' } }];
+    if (assistantText.trim()) items.push({ text: assistantText, metadata: { role: 'assistant' } });
+    indexMemoryItems(items, req.user.id).catch((err) => {
+      console.warn('[memory] auto-index failed:', err && err.message ? err.message : err);
+    });
+  };
+
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       res.write(value);
+      if (memoryDecoder) {
+        ndjsonBuffer += memoryDecoder.decode(value, { stream: true });
+        const lines = ndjsonBuffer.split('\n');
+        ndjsonBuffer = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const obj = JSON.parse(line);
+            if (obj && obj.message && typeof obj.message.content === 'string') {
+              assistantText += obj.message.content;
+            }
+          } catch {
+            // Partial or malformed line — indexing is best-effort; skip it.
+          }
+        }
+      }
     }
   } catch (err) {
     // Client likely disconnected or upstream dropped; nothing more to do.
   } finally {
+    autoIndexCompletedTurn();
     if (!res.writableEnded) res.end();
   }
 });
@@ -645,6 +756,22 @@ app.delete('/api/sessions/:id', (req, res) => {
 // another account's search results — same scoping principle as the
 // /api/sessions routes above.
 
+// Shared by the /api/memory/index route and /api/chat's auto-indexing of
+// completed turns. Embeds and upserts each item sequentially; the item's
+// text is stored in the payload (not just embedded), so semantic search can
+// return the excerpt itself rather than an opaque vector match.
+async function indexMemoryItems(items, userId) {
+  for (const item of items) {
+    const vector = await embeddings.embed(item.text);
+    await qdrant.upsertPoint({
+      id: item.id ?? crypto.randomUUID(),
+      vector,
+      payload: { ...(item.metadata || {}), text: item.text, userId },
+    });
+  }
+  return items.length;
+}
+
 // Index one message (or an array of them) for later semantic search.
 // Body: { id, text, metadata } or an array of such objects.
 app.post('/api/memory/index', memoryIndexRateLimiter, async (req, res) => {
@@ -664,15 +791,8 @@ app.post('/api/memory/index', memoryIndexRateLimiter, async (req, res) => {
   }
 
   try {
-    for (const item of items) {
-      const vector = await embeddings.embed(item.text);
-      await qdrant.upsertPoint({
-        id: item.id ?? crypto.randomUUID(),
-        vector,
-        payload: { ...(item.metadata || {}), userId: req.user.id },
-      });
-    }
-    res.json({ ok: true, indexed: items.length });
+    const indexed = await indexMemoryItems(items, req.user.id);
+    res.json({ ok: true, indexed });
   } catch (err) {
     res.status(503).json({ error: `Semantic memory indexing failed: ${err.message}` });
   }

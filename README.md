@@ -381,10 +381,20 @@ The `/api/memory/index` and `/api/memory/search` endpoints add optional
 semantic search / RAG over past chat messages, backed by
 [Qdrant](https://qdrant.tech) as the vector store. **Qdrant here only stores
 vectors and metadata payloads for similarity search — it is not the primary
-chat-history store** (that's a separate feature). These endpoints are not
-wired into `/api/chat` automatically; nothing calls them unless you do.
-Indexed points are tagged with the indexing user's id and search filters by
+chat-history store** (that's a separate feature). Indexed points are tagged
+with the indexing user's id and search filters by
 it, so semantic memory is also scoped per-user.
+
+### Chat integration (opt-in)
+
+Enabling **Settings → Semantic memory** (the `useMemory` flag) wires this
+into `/api/chat`: the latest user message is embedded, your indexed memory
+is searched, and the top-k excerpts are injected as one `[retrieved-memory]`
+system message ahead of the conversation. The completed turn (your message
+and the assistant's reply) is then indexed automatically for future
+retrieval. Retrieval and indexing are **fail-open**: if Qdrant or the
+embedding model is unavailable, chat proceeds normally without memory. Tuning
+env vars: `MEMORY_TOP_K` (default 5), `MEMORY_TIMEOUT_MS` (default 3000).
 
 ### Endpoints
 

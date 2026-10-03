@@ -18,6 +18,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const qdrant = require('../qdrant');
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ollama-chat-stream-test-'));
 process.env.SESSIONS_DATA_FILE = path.join(tmpDir, 'sessions.json');
@@ -38,6 +39,7 @@ function createFakeOllama() {
     holdNextChat: false,
     chatRequests: [], // { body, closed }
     summarizeRequests: [], // { body } — non-streaming /api/chat calls
+    embedRequests: [], // { body } — /api/embed calls (memory retrieval)
     pullRequests: [], // { body }
     deleteRequests: [], // { name }
   };
@@ -85,6 +87,17 @@ function createFakeOllama() {
       return;
     }
 
+    if (req.url === '/api/embed') {
+      // The embeddings endpoint used by semantic-memory retrieval. A fixed
+      // 768-dim vector (EMBEDDING_DIM's default) so qdrant.upsertPoint's
+      // dimension guard passes in the auto-index tests.
+      state.embedRequests.push({ body });
+      const vector = Array.from({ length: 768 }, () => 0.1);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ embeddings: [vector] }));
+      return;
+    }
+
     if (req.url === '/api/pull') {
       state.pullRequests.push({ body });
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
@@ -122,6 +135,7 @@ let app;
 let appServer;
 let baseUrl;
 let sessionCookie;
+let userId;
 
 test.before(async () => {
   await new Promise((resolve) => fake.server.listen(0, '127.0.0.1', resolve));
@@ -142,6 +156,7 @@ test.before(async () => {
   const setCookie = signupRes.headers.get('set-cookie');
   assert.ok(setCookie, 'signup must set a session cookie');
   sessionCookie = setCookie.split(';')[0];
+  userId = (await signupRes.json()).user.id;
 });
 
 test.after(async () => {
@@ -332,4 +347,160 @@ test('POST /api/chat requires a logged-in session', async () => {
 
   assert.equal(res.status, 401);
   assert.equal(fake.state.chatRequests.length, before, 'no upstream request may be made');
+});
+
+// --- semantic memory (useMemory) ------------------------------------------
+//
+// The fake Qdrant client implements just what qdrant.js calls:
+// collectionExists/getCollection (ensureCollection), upsert, search.
+
+function createFakeQdrant(overrides = {}) {
+  const state = { upserts: [], searches: [] };
+  const client = {
+    async collectionExists() {
+      return { exists: true };
+    },
+    async getCollection() {
+      return { config: { params: { vectors: { size: 768 } } } };
+    },
+    async upsert(collection, { points }) {
+      state.upserts.push(...points);
+      return {};
+    },
+    async search(collection, params) {
+      state.searches.push(params);
+      return (overrides.searchResults || []).map((r, i) => ({
+        id: i + 1,
+        score: 0.9 - i * 0.1,
+        payload: r,
+      }));
+    },
+  };
+  return { state, client };
+}
+
+test('POST /api/chat with useMemory injects retrieved memory and auto-indexes the turn', async () => {
+  const fakeQdrant = createFakeQdrant({
+    searchResults: [{ text: 'the user likes the color blue', userId: 'someone' }],
+  });
+  qdrant._setClientForTests(fakeQdrant.client);
+
+  try {
+    const embedsBefore = fake.state.embedRequests.length;
+    const res = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        model: 'llama3',
+        messages: [{ role: 'user', content: 'what is my favorite color?' }],
+        useMemory: true,
+      }),
+    });
+    const text = await res.text();
+    assert.equal(res.status, 200, `stream failed: ${text}`);
+
+    // Retrieval happened against the latest user message.
+    assert.equal(fake.state.embedRequests.length, embedsBefore + 1);
+    assert.equal(fakeQdrant.state.searches.length, 1);
+    assert.deepEqual(fakeQdrant.state.searches[0].filter.must, [
+      { key: 'userId', match: { value: userId } },
+    ]);
+
+    // The forwarded upstream request carries the injected memory system
+    // message ahead of the user's message.
+    const forwarded = fake.state.chatRequests[fake.state.chatRequests.length - 1].body;
+    assert.equal(forwarded.messages[0].role, 'system');
+    assert.match(forwarded.messages[0].content, /\[retrieved-memory\]/);
+    assert.match(forwarded.messages[0].content, /the user likes the color blue/);
+    assert.equal(forwarded.messages[1].role, 'user');
+
+    // The completed turn was auto-indexed: both the user's message and the
+    // full assistant reply, each with the indexing user's id.
+    await withTimeout(
+      (async () => {
+        for (let i = 0; i < 50 && fakeQdrant.state.upserts.length < 2; i += 1) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      })(),
+      5000,
+      'the turn to be auto-indexed'
+    );
+    assert.equal(fakeQdrant.state.upserts.length, 2);
+    assert.equal(fakeQdrant.state.upserts[0].payload.text, 'what is my favorite color?');
+    assert.equal(fakeQdrant.state.upserts[0].payload.userId, userId);
+    assert.equal(fakeQdrant.state.upserts[0].payload.role, 'user');
+    assert.equal(fakeQdrant.state.upserts[1].payload.role, 'assistant');
+    assert.match(fakeQdrant.state.upserts[1].payload.text, /chunk-onechunk-two/);
+  } finally {
+    qdrant._setClientForTests(null);
+  }
+});
+
+test('POST /api/chat with useMemory fails open when retrieval errors', async () => {
+  const fakeQdrant = createFakeQdrant();
+  fakeQdrant.client.search = async () => {
+    throw new Error('qdrant down');
+  };
+  qdrant._setClientForTests(fakeQdrant.client);
+
+  try {
+    const res = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        model: 'llama3',
+        messages: [{ role: 'user', content: 'hello again' }],
+        useMemory: true,
+      }),
+    });
+
+    // The chat itself must stream normally, with no memory message and no
+    // error surfaced to the client.
+    assert.equal(res.status, 200);
+    const lines = (await res.text()).split('\n').filter((l) => l.trim());
+    assert.deepEqual(lines.map((l) => JSON.parse(l).message.content), ['chunk-one', 'chunk-two']);
+    const forwarded = fake.state.chatRequests[fake.state.chatRequests.length - 1].body;
+    assert.equal(forwarded.messages.length, 1);
+    assert.equal(forwarded.messages[0].role, 'user');
+
+    // Drain this request's fire-and-forget auto-index (the turn IS indexed
+    // even though retrieval failed) so its async embeds can't leak into the
+    // next test's assertions.
+    await withTimeout(
+      (async () => {
+        for (let i = 0; i < 50 && fakeQdrant.state.upserts.length < 2; i += 1) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      })(),
+      5000,
+      'the auto-index to drain'
+    );
+  } finally {
+    qdrant._setClientForTests(null);
+  }
+});
+
+test('POST /api/chat without useMemory never contacts the memory stack', async () => {
+  const fakeQdrant = createFakeQdrant();
+  qdrant._setClientForTests(fakeQdrant.client);
+
+  try {
+    const embedsBefore = fake.state.embedRequests.length;
+    const res = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        model: 'llama3',
+        messages: [{ role: 'user', content: 'plain chat' }],
+      }),
+    });
+    await res.text();
+    assert.equal(res.status, 200);
+    assert.equal(fake.state.embedRequests.length, embedsBefore, 'no embeddings call');
+    assert.equal(fakeQdrant.state.searches.length, 0, 'no qdrant searches');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(fakeQdrant.state.upserts.length, 0, 'no auto-indexing');
+  } finally {
+    qdrant._setClientForTests(null);
+  }
 });
