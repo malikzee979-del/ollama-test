@@ -187,3 +187,50 @@ test('searchByVector recovers via the same retry path and maps results to {id, s
   assert.equal(existsCalls, 2, 'collection existence must be rechecked once during the retry');
   assert.deepEqual(results, [{ id: 'p1', score: 0.9, payload: { text: 'hi' } }]);
 });
+
+// TODO 2.7's "Qdrant reconnection loop" flap: while Qdrant is down the caller
+// sees the raw failure (server.js turns it into a 503 / fails open), and once
+// it is back the very next request succeeds with no manual reset — the failed
+// attempt leaves collectionReady false, so ensureCollection() re-runs. No
+// reconnection loop or new code path is needed; this test pins that contract.
+test('a Qdrant outage surfaces an error, and the next request recovers once it is back', async () => {
+  const qdrant = freshQdrant();
+  const dim = qdrant.EMBEDDING_DIM;
+
+  let existsCalls = 0;
+  let searchCalls = 0;
+
+  const fake = {
+    async collectionExists() {
+      existsCalls += 1;
+      if (existsCalls === 1) {
+        throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6333'), { code: 'ECONNREFUSED' });
+      }
+      return { exists: true };
+    },
+    async createCollection() {
+      throw new Error('createCollection must not be called during a pure outage/recovery flap');
+    },
+    async getCollection() {
+      return { config: { params: { vectors: { size: dim } } } };
+    },
+    async upsert() {
+      return { status: 'completed' };
+    },
+    async search() {
+      searchCalls += 1;
+      return [{ id: 'p1', score: 0.9, payload: { text: 'back online' } }];
+    },
+  };
+
+  qdrant._setClientForTests(fake);
+
+  await assert.rejects(
+    () => qdrant.searchByVector(new Array(dim).fill(0.1), { limit: 5 }),
+    /ECONNREFUSED/,
+  );
+
+  const results = await qdrant.searchByVector(new Array(dim).fill(0.1), { limit: 5 });
+  assert.equal(searchCalls, 1, 'the recovery request must succeed on its first search');
+  assert.deepEqual(results, [{ id: 'p1', score: 0.9, payload: { text: 'back online' } }]);
+});
