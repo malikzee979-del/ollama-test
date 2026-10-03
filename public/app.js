@@ -37,12 +37,20 @@
   };
 
   // ---------- Attachments ----------
-  const ATTACHMENT_EXTENSIONS = [
-    '.txt', '.md', '.markdown', '.json', '.csv', '.tsv', '.log',
-    '.js', '.ts', '.py', '.html', '.css', '.yaml', '.yml', '.xml', '.sh',
-  ];
-  const ATTACHMENT_MAX_SIZE = 200 * 1024; // 200KB per file
-  const ATTACHMENT_MAX_COUNT = 3; // per message
+  // Constants and the pure helpers below live in chat-helpers.js (loaded
+  // before this script) so the test suite can exercise them without a DOM.
+  const {
+    ATTACHMENT_MAX_COUNT,
+    formatBytes,
+    attachmentError,
+    buildOllamaMessages,
+    estimateChatTokens,
+    formatTokens,
+    normalizeSettings,
+    chatToMarkdown,
+    chatToJson,
+    exportFilename,
+  } = window.ChatHelpers;
 
   // ---------- Elements ----------
   const el = {
@@ -144,14 +152,10 @@
   function loadSettings() {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
-      return raw ? JSON.parse(raw) : defaultSettings();
+      return normalizeSettings(raw ? JSON.parse(raw) : null);
     } catch {
-      return defaultSettings();
+      return normalizeSettings(null);
     }
-  }
-
-  function defaultSettings() {
-    return { systemPrompt: '', temperature: 0.8, topP: 0.9, numCtx: 4096, useMemory: false, lastModel: '' };
   }
 
   function saveSettings() {
@@ -738,17 +742,7 @@
     }
   }
 
-  function formatBytes(bytes) {
-    if (!bytes && bytes !== 0) return '';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let val = bytes;
-    let i = 0;
-    while (val >= 1024 && i < units.length - 1) {
-      val /= 1024;
-      i++;
-    }
-    return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
-  }
+  // formatBytes lives in chat-helpers.js (shared with the tests).
 
   // ---------- Model management (settings) ----------
   function renderInstalledModels() {
@@ -880,10 +874,7 @@
   });
 
   // ---------- File attachments ----------
-  function getExtension(name) {
-    const idx = name.lastIndexOf('.');
-    return idx === -1 ? '' : name.slice(idx).toLowerCase();
-  }
+  // getExtension lives in chat-helpers.js, folded into attachmentError.
 
   function buildAttachmentChip(att, { removable }) {
     const chip = document.createElement('div');
@@ -937,17 +928,13 @@
   async function handleFileSelect(fileList) {
     const files = Array.from(fileList || []);
     for (const file of files) {
-      if (pendingAttachments.length >= ATTACHMENT_MAX_COUNT) {
-        showError(`You can attach at most ${ATTACHMENT_MAX_COUNT} files per message.`);
-        break;
-      }
-      const ext = getExtension(file.name);
-      if (!ATTACHMENT_EXTENSIONS.includes(ext)) {
-        showError(`"${file.name}" isn't a supported text file type.`);
-        continue;
-      }
-      if (file.size > ATTACHMENT_MAX_SIZE) {
-        showError(`"${file.name}" is ${formatBytes(file.size)}, which exceeds the ${formatBytes(ATTACHMENT_MAX_SIZE)} limit per file.`);
+      const attachmentProblem = attachmentError(file.name, file.size, pendingAttachments.length);
+      if (attachmentProblem) {
+        showError(attachmentProblem);
+        // The per-message count is the one condition that makes every
+        // remaining file unacceptable too; type/size failures only skip
+        // their own file.
+        if (pendingAttachments.length >= ATTACHMENT_MAX_COUNT) break;
         continue;
       }
       try {
@@ -1028,26 +1015,8 @@
     await streamAssistantReply(chat, model);
   });
 
-  function buildOllamaMessages(chat) {
-    const msgs = [];
-    if (settings.systemPrompt && settings.systemPrompt.trim()) {
-      msgs.push({ role: 'system', content: settings.systemPrompt.trim() });
-    }
-    for (const m of chat.messages) {
-      let content = m.content;
-      if (m.attachments && m.attachments.length) {
-        const blocks = m.attachments
-          .map((a) => `[Attached file: ${a.name}]\n\`\`\`\n${a.content}\n\`\`\``)
-          .join('\n\n');
-        content = content ? `${content}\n\n${blocks}` : blocks;
-      }
-      msgs.push({ role: m.role, content });
-    }
-    return msgs;
-  }
-
   async function streamAssistantReply(chat, model) {
-    const ollamaMessages = buildOllamaMessages(chat);
+    const ollamaMessages = buildOllamaMessages(settings.systemPrompt, chat.messages);
 
     const assistantMsg = { role: 'assistant', content: '', model };
     chat.messages.push(assistantMsg);
@@ -1231,26 +1200,14 @@
   }
 
   // ---------- Context window meter ----------
-  // Mirrors compaction.js's CHARS_PER_TOKEN heuristic (chars/4 ≈ tokens)
-  // so the figure shown here is the same one the server's compaction
-  // trigger reasons about. There is no build step (see PLAN.md D5), so the
-  // constant is duplicated rather than imported — keep the two in sync.
-  const CHARS_PER_TOKEN = 4;
+  // Mirrors compaction.js's CHARS_PER_TOKEN heuristic — the constant itself
+  // lives in chat-helpers.js, which the context meter shares with the test
+  // suite.
 
   // Chats whose last /api/chat response came back with X-Compacted: true.
   // Not persisted: compaction is a property of a request, not of the saved
   // history, so the note is scoped to this browsing session.
   const compactedChats = new Set();
-
-  function estimateChatTokens(chat) {
-    let chars = 0;
-    for (const msg of buildOllamaMessages(chat)) chars += msg.content.length;
-    return Math.ceil(chars / CHARS_PER_TOKEN);
-  }
-
-  function formatTokens(count) {
-    return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
-  }
 
   function updateContextMeter() {
     if (!el.contextMeter) return;
@@ -1259,7 +1216,7 @@
       el.contextMeter.classList.add('hidden');
       return;
     }
-    const tokens = estimateChatTokens(chat);
+    const tokens = estimateChatTokens(settings.systemPrompt, chat.messages);
     const limit = settings.numCtx || 4096;
     const ratio = Math.min(1, tokens / limit);
     el.contextMeter.classList.remove('hidden');
@@ -1275,42 +1232,10 @@
   // Frontend-only, no dependency: build the text in memory and hand it to
   // the browser as a Blob download. Markdown reuses the same
   // "[Attached file: ...]" fenced-block shape buildOllamaMessages() sends
-  // to the model, so an exported chat reads the way the model saw it.
-
-  function chatToMarkdown(chat) {
-    const lines = [`# ${chat.title}`, ''];
-    for (const msg of chat.messages) {
-      lines.push(`## ${msg.role === 'user' ? 'You' : msg.model || 'Assistant'}`, '');
-      if (msg.content) lines.push(msg.content, '');
-      for (const att of msg.attachments || []) {
-        lines.push(`[Attached file: ${att.name}]`, '```', att.content, '```', '');
-      }
-    }
-    return lines.join('\n');
-  }
-
-  function chatToJson(chat) {
-    return JSON.stringify(
-      {
-        id: chat.id,
-        title: chat.title,
-        createdAt: chat.createdAt,
-        updatedAt: chat.updatedAt,
-        messages: chat.messages,
-      },
-      null,
-      2
-    );
-  }
-
-  function exportFilename(chat, extension) {
-    const slug = (chat.title || 'chat')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 60) || 'chat';
-    return `${slug}-${new Date().toISOString().slice(0, 10)}.${extension}`;
-  }
+  // to the model, so an exported chat reads the way the model saw it. The
+  // pure text builders (chatToMarkdown / chatToJson / exportFilename) live
+  // in chat-helpers.js, shared with the tests; downloadBlob below is the
+  // only DOM-coupled piece.
 
   function downloadBlob(filename, mimeType, text) {
     const url = URL.createObjectURL(new Blob([text], { type: mimeType }));

@@ -53,4 +53,13 @@ module.exports = [
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
     },
   },
+  {
+    // chat-helpers.js is browser code, but it carries a CommonJS export
+    // guard so the Node test suite can require the very same file — hence
+    // the `module` global on top of the browser set.
+    files: ['public/chat-helpers.js'],
+    languageOptions: {
+      globals: { ...globals.browser, module: 'readonly' },
+    },
+  },
 ];
