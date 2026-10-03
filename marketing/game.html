@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play — Local Theft Auto</title>
+  <meta name="description" content="Play Local Theft Auto right now: a top-down GTA-style city that runs entirely in your browser. Steal cars, collect packages, mind the pedestrians — nothing leaves your machine, not even your crimes.">
+  <meta name="theme-color" content="#07090d">
+  <link rel="stylesheet" href="marketing.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%23ffb224'/%3E%3C/svg%3E">
+</head>
+<body id="top">
+<canvas id="bgfx" aria-hidden="true"></canvas>
+<span class="cursor-dot" aria-hidden="true"></span>
+<span class="nav-indicator" aria-hidden="true"></span>
+<div class="rail" aria-hidden="true"><i class="rail-line"></i><i class="rail-fill"></i></div>
+<div class="shroud" aria-hidden="true">
+  <div class="shroud-plate shroud-plate-tl"><span class="shroud-label mono"></span><span class="shroud-tick"></span></div>
+  <div class="shroud-plate shroud-plate-br"><span class="shroud-tick"></span><span class="shroud-label mono"></span></div>
+</div>
+
+<a class="skip" href="#main">Skip to content</a>
+<div class="noise" aria-hidden="true"></div>
+
+<header id="nav">
+  <div class="nav-shell">
+    <a class="brand" href="index.html" aria-label="Local Theft Auto — home">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <span class="brand-name">Local&nbsp;Theft&nbsp;Auto</span>
+    </a>
+    <nav class="nav-menu" aria-label="Primary">
+      <a href="world.html">World</a>
+      <a href="driving.html">Vehicles</a>
+      <a href="missions.html">Missions</a>
+      <a href="wanted.html">Wanted</a>
+      <a href="combat.html">Combat</a>
+      <a href="progression.html">Progression</a>
+      <a href="controls.html">Controls</a>
+      <a href="faq.html">FAQ</a>
+      <a class="nav-cta nav-cta-mobile" href="game.html">▶ Play now</a>
+    </nav>
+    <a class="nav-cta" href="game.html">▶ Play now</a>
+    <button class="menu-btn" data-menu-btn aria-label="Menu" aria-expanded="false">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="section page-hero ph-lean" aria-labelledby="page-h">
+    <div class="hero-bg" aria-hidden="true">
+      <div class="grid-floor"></div>
+      <div class="hero-glow"></div>
+    </div>
+    <div class="wrap">
+      <div class="ph-copy">
+        <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>now playable · zero network</p>
+        <h1 id="page-h" class="display reveal">Local Theft Auto. <span class="grad">Your crimes never leave the machine.</span></h1>
+        <p class="page-lede reveal">A top-down city rendered entirely in your browser: cars to borrow, amber packages to collect, pedestrians to respect, and a local police force that enforces local law. No server, no telemetry — the only thing you can steal is the high score.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section game-section" aria-label="Local Theft Auto game">
+    <div class="wrap">
+      <div class="port game-port reveal-depth">
+      <div class="game-frame reveal">
+        <canvas id="gameCanvas" aria-label="Local Theft Auto: a top-down city driving game. Use the keyboard to play."></canvas>
+        <div class="game-touch" id="gameTouch" aria-hidden="true">
+          <div class="touch-pad touch-pad-left">
+            <button class="touch-btn touch-up" type="button" data-key="w" aria-label="Accelerate">▲</button>
+            <button class="touch-btn touch-left" type="button" data-key="a" aria-label="Steer left">◀</button>
+            <button class="touch-btn touch-right" type="button" data-key="d" aria-label="Steer right">▶</button>
+            <button class="touch-btn touch-down" type="button" data-key="s" aria-label="Brake / reverse">▼</button>
+          </div>
+          <div class="touch-pad touch-pad-right">
+            <button class="touch-btn touch-brake" type="button" data-key=" " aria-label="Handbrake">⊘</button>
+            <button class="touch-btn touch-action" type="button" data-key="e" aria-label="Enter or exit vehicle">E</button>
+            <button class="touch-btn touch-punch" type="button" data-key="f" aria-label="Punch, swing or shoot">F</button>
+            <button class="touch-btn touch-pause" type="button" data-key="p" aria-label="Pause or resume">P</button>
+            <button class="touch-btn touch-mute" type="button" data-key="m" aria-label="Mute or unmute">M</button>
+            <button class="touch-btn touch-horn" type="button" data-key="h" aria-label="Horn">H</button>
+          </div>
+        </div>
+        <div class="game-overlay" id="gameOverlay">
+          <p class="game-kicker mono">a toy city · no network · no pixels leave your machine</p>
+          <h2 class="display game-title">Local Theft Auto</h2>
+          <ul class="game-keys" aria-label="Controls">
+            <li><span class="key mono">W A S D</span> / <span class="key mono">← ↑ ↓ →</span> walk &amp; drive</li>
+            <li><span class="key mono">E</span> enter / exit a car</li>
+            <li><span class="key mono">SPACE</span> handbrake &middot; <span class="key mono">F</span> punch / swing &middot; <span class="key mono">H</span> horn</li>
+            <li><span class="key mono">P</span> pause &middot; <span class="key mono">M</span> mute &middot; <span class="key mono">R</span> restart &middot; touch: pads &amp; <span class="key mono">P</span>/<span class="key mono">M</span>/<span class="key mono">H</span> buttons</li>
+            <li><span class="key mono">1 2 3</span> while paused: traffic &middot; police &middot; peaceful mode &middot; <span class="key mono">4 5</span> skin &amp; shirt</li>
+            <li><span class="key key-amber mono">●</span> collect the amber packages</li>
+            <li><span class="key key-red mono">★</span> don’t run over the locals</li>
+          </ul>
+          <button class="nav-cta game-start" id="gameStart" type="button">Start driving</button>
+          <p class="game-stats mono" id="gameStats"></p>
+        </div>
+      </div>
+      </div>
+      <p class="game-note mono reveal">rendered on &lt;canvas&gt; at 60fps · pedestrians respawn · the police forgive, eventually</p>
+    </div>
+  </section>
+
+  <!-- =========================================== what you're playing -->
+  <section class="section features" aria-labelledby="playing-h">
+    <div class="wrap port is-warm reveal-depth">
+      <div class="sec-head reveal-depth">
+        <span class="ch-num" aria-hidden="true">01</span>
+        <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>while you're stuck at a light</p>
+        <h2 id="playing-h" class="display reveal-scan">What’s actually running <span class="grad">under the hood.</span></h2>
+      </div>
+      <div class="ledger">
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">The world</h3>
+            <p>A 96×96 hashed grid with a river, a stadium and four hidden corner shops.</p>
+          </div>
+          <a class="b-more ledger-meta" href="world.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Districts</h3>
+            <p>Downtown towers, warm residential rows and flat industrial blocks — hashed per block, drawn, never simulated.</p>
+          </div>
+          <a class="b-more ledger-meta" href="world.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Weather</h3>
+            <p>Rain rolls in on a timer: slicker grip, shorter headlights, streaks and wet asphalt until it blows over.</p>
+          </div>
+          <a class="b-more ledger-meta" href="world.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Vehicles</h3>
+            <p>Drift physics, per-car handling rolls, damage, and a garage that remembers your ride.</p>
+          </div>
+          <a class="b-more ledger-meta" href="driving.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Missions</h3>
+            <p>Delivery, circuit, steal, ram and escort contracts — one posts whenever you're free.</p>
+          </div>
+          <a class="b-more ledger-meta" href="missions.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Wanted &amp; police</h3>
+            <p>Five stars of heat, roadblocks, a helicopter, and three ways to shake it off.</p>
+          </div>
+          <a class="b-more ledger-meta" href="wanted.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Combat</h3>
+            <p>A punch, a bat if you find one, panicking pedestrians, stunned cops.</p>
+          </div>
+          <a class="b-more ledger-meta" href="combat.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Progression</h3>
+            <p>High score, five achievements, and lifetime stats saved to this browser.</p>
+          </div>
+          <a class="b-more ledger-meta" href="progression.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="ledger-row reveal">
+          <span class="ledger-num" aria-hidden="true"></span>
+          <div class="ledger-body">
+            <h3 class="b-title">Character pick</h3>
+            <p>Choose your ped's skin tone and shirt from the pause menu — the look is saved to this browser.</p>
+          </div>
+          <a class="b-more ledger-meta" href="controls.html">Read more <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section closing" aria-labelledby="close-h">
+    <div class="closing-bg" aria-hidden="true"><div class="grid-floor floor-up"></div></div>
+    <div class="wrap closing-wrap">
+      <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>controls, in full</p>
+      <h2 id="close-h" class="display closing-h reveal">Every key,<br><span class="grad">one dedicated page.</span></h2>
+      <a class="nav-cta cta-big reveal" href="controls.html">See the full control scheme</a>
+      <p class="closing-note mono reveal">Keyboard · touch pads · pause-menu difficulty knobs</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <p class="brand footer-logo"><span class="brand-dot" aria-hidden="true"></span><span class="brand-name">Local Theft Auto</span></p>
+      <p class="footer-desc">A top-down city that runs entirely in your browser tab. One canvas, one script, zero network calls — the only thing you can steal is the high score.</p>
+    </div>
+    <nav class="footer-col" aria-label="Explore">
+      <p class="footer-h mono">Explore</p>
+      <a href="world.html">World</a>
+      <a href="driving.html">Vehicles</a>
+      <a href="missions.html">Missions</a>
+      <a href="wanted.html">Wanted</a>
+      <a href="combat.html">Combat</a>
+      <a href="progression.html">Progression</a>
+      <a href="controls.html">Controls</a>
+      <a href="faq.html">FAQ</a>
+    </nav>
+    <div class="footer-col">
+      <p class="footer-h mono">Quick start</p>
+      <p class="footer-cmd mono">WASD — walk / drive</p>
+      <p class="footer-cmd mono">E — enter or exit a car</p>
+      <p class="footer-cmd mono">F — punch or swing</p>
+      <a class="footer-cmd mono" href="#top">Back to the game ↑</a>
+    </div>
+  </div>
+  <div class="wrap footer-legal">
+    <p class="mono">© 2026 Local Theft Auto — local by design. Built inside the <a href="about.html">Ollama Chat</a> project.</p>
+    <a class="mono" href="#top">Back to top ↑</a>
+  </div>
+</footer>
+
+<div class="chat-widget">
+  <button class="chat-launcher" id="chatLauncher" type="button"
+          aria-label="Open chat with your local Ollama" aria-expanded="false" aria-controls="chatPanel">
+    <svg class="chat-glyph-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 3.5c-4.9 0-8.5 3.3-8.5 7.6 0 2 .8 3.8 2.1 5.1-.2 1.2-.7 2.4-1.6 3.3 1.6-.1 3.1-.7 4.2-1.4 1.1.4 2.4.6 3.8.6 4.9 0 8.5-3.3 8.5-7.6S16.9 3.5 12 3.5Z"/>
+    </svg>
+    <svg class="chat-glyph-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M6 6l12 12M18 6L6 18"/>
+    </svg>
+  </button>
+  <section class="chat-panel" id="chatPanel" aria-label="Chat with your local Ollama">
+    <header class="chat-head">
+      <span class="chat-status" id="chatStatus" data-state="checking" aria-hidden="true"></span>
+      <div class="chat-head-text">
+        <p class="chat-title">Local chat</p>
+        <p class="chat-sub mono" id="chatSub">reaching 127.0.0.1:11434…</p>
+      </div>
+      <label class="sr-only" for="chatModel">Model</label>
+      <select class="chat-model mono" id="chatModel" disabled></select>
+      <button class="chat-close" id="chatClose" type="button" aria-label="Close chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="chat-log" id="chatLog"></div>
+    <form class="chat-form" id="chatForm">
+      <label class="sr-only" for="chatInput">Message your local model</label>
+      <input class="chat-input" id="chatInput" type="text" placeholder="Ask your local model…" autocomplete="off" enterkeyhint="send">
+      <button class="chat-send" id="chatSend" type="submit" aria-label="Send message">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 12.5v-9M8 3.5 4.5 7M8 3.5 11.5 7"/></svg>
+      </button>
+      <button class="chat-stop" id="chatStop" type="button" hidden>Stop</button>
+    </form>
+    <p class="chat-foot mono">runs on your machine — nothing leaves it</p>
+  </section>
+</div>
+
+<script src="main.js"></script>
+<script src="chat.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

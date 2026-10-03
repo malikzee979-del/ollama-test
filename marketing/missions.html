@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Missions &amp; heists — Local Theft Auto</title>
+  <meta name="description" content="Delivery runs, checkpoint circuits, steal contracts, ram jobs and a VIP escort — the six job types on Local Theft Auto's contract board, and how each one pays out.">
+  <meta name="theme-color" content="#07090d">
+  <link rel="stylesheet" href="marketing.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%23ffb224'/%3E%3C/svg%3E">
+</head>
+<body id="top">
+<canvas id="bgfx" aria-hidden="true"></canvas>
+<span class="cursor-dot" aria-hidden="true"></span>
+<span class="nav-indicator" aria-hidden="true"></span>
+<div class="rail" aria-hidden="true"><i class="rail-line"></i><i class="rail-fill"></i></div>
+<div class="shroud" aria-hidden="true">
+  <div class="shroud-plate shroud-plate-tl"><span class="shroud-label mono"></span><span class="shroud-tick"></span></div>
+  <div class="shroud-plate shroud-plate-br"><span class="shroud-tick"></span><span class="shroud-label mono"></span></div>
+</div>
+
+<a class="skip" href="#main">Skip to content</a>
+<div class="noise" aria-hidden="true"></div>
+
+<header id="nav">
+  <div class="nav-shell">
+    <a class="brand" href="index.html" aria-label="Local Theft Auto — home">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <span class="brand-name">Local&nbsp;Theft&nbsp;Auto</span>
+    </a>
+    <nav class="nav-menu" aria-label="Primary">
+      <a href="world.html">World</a>
+      <a href="driving.html">Vehicles</a>
+      <a href="missions.html" class="is-active" aria-current="page">Missions</a>
+      <a href="wanted.html">Wanted</a>
+      <a href="combat.html">Combat</a>
+      <a href="progression.html">Progression</a>
+      <a href="controls.html">Controls</a>
+      <a href="faq.html">FAQ</a>
+      <a class="nav-cta nav-cta-mobile" href="game.html">▶ Play now</a>
+    </nav>
+    <a class="nav-cta" href="game.html">▶ Play now</a>
+    <button class="menu-btn" data-menu-btn aria-label="Menu" aria-expanded="false">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="section page-hero ph-split" aria-labelledby="page-h">
+    <div class="hero-bg" aria-hidden="true">
+      <div class="grid-floor"></div>
+      <div class="hero-glow"></div>
+    </div>
+    <div class="wrap">
+      <div class="ph-copy">
+        <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>missions &amp; heists</p>
+        <h1 id="page-h" class="display reveal">A new job posts itself <span class="grad">the moment you're free.</span></h1>
+        <p class="page-lede reveal">Six mission types share one contract board. Whenever you're not already on a job, the game offers you a fresh one on a timer — a marker appears in the world and on the minimap, and a deadline starts ticking.</p>
+      </div>
+      <div class="ph-spec" aria-hidden="true">
+        <span class="s-jobs"></span>
+        <span class="s-slot"></span>
+        <span class="s-weight"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-label="Mission types">
+    <div class="wrap port reveal-depth">
+      <div class="job-board">
+        <div class="ledger">
+          <div class="ledger-row reveal">
+            <span class="app-tag mono">delivery</span>
+            <div class="ledger-body">
+              <h3 class="b-title">Delivery run</h3>
+              <p>Reach a marker placed well across the city before the clock runs out. The baseline job — weighted to show up most often — with a reward that scales with the distance you had to cover.</p>
+            </div>
+          </div>
+          <div class="ledger-row reveal">
+            <span class="app-tag mono">circuit</span>
+            <div class="ledger-body">
+              <h3 class="b-title">Checkpoint circuit</h3>
+              <p>Four to six checkpoints, spaced apart so the route actually crosses the city, each with its own deadline pressure baked into one overall timer. Clear them all before time expires.</p>
+            </div>
+          </div>
+          <div class="ledger-row reveal">
+            <span class="app-tag mono">steal</span>
+            <div class="ledger-body">
+              <h3 class="b-title">Steal contract</h3>
+              <p>One specific parked car is marked — not any car, that car. Get to it and take it within 60 seconds before someone else does, or it's gone.</p>
+            </div>
+          </div>
+          <div class="ledger-row reveal">
+            <span class="app-tag mono">ram</span>
+            <div class="ledger-body">
+              <h3 class="b-title">Ram job</h3>
+              <p>A moving target vehicle is marked for wrecking. Run it off the road within 45 seconds — a straightforward, aggressive contract with a shorter fuse.</p>
+            </div>
+          </div>
+          <div class="ledger-row reveal">
+            <span class="app-tag mono">escort</span>
+            <div class="ledger-body">
+              <h3 class="b-title">VIP escort</h3>
+              <p>Reach a VIP on foot at a pickup marker, then get them safely to a destination marker across town. Drive carelessly near them and the contract fails outright — this is the one job where speed and caution actually compete with each other.</p>
+            </div>
+          </div>
+        </div>
+        <div class="job-note reveal">
+          <h3 class="b-title">One shared slot</h3>
+          <p>Only one mission is ever active at a time. Fail or finish it, and the board waits a short cooldown before offering the next.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================= how rewards scale -->
+  <section class="section" aria-labelledby="pay-h">
+    <div class="wrap privacy-grid">
+      <div class="privacy-copy">
+        <h2 id="pay-h" class="display reveal-scan">Rewards <span class="grad">scale with the risk.</span></h2>
+        <ul class="proof-list">
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Delivery and circuit payouts grow with the distance you actually had to travel — a marker across the map pays more than one around the corner.</span></li>
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Steal, ram and escort contracts pay a flat bounty, because the difficulty there is in finding and reaching one specific target, not the distance.</span></li>
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Every completed mission also counts toward your lifetime delivery total — five of them unlocks the Courier achievement.</span></li>
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Score earned here is the only thing that pays for a garage-saved car's fuel or a paint shop's silence — missions fund your evasion.</span></li>
+        </ul>
+      </div>
+      <div class="app-card reveal" style="max-width: 420px;">
+        <span class="app-tag mono">contract board</span>
+        <h3 class="b-title">Six slots, one active job</h3>
+        <p>Delivery is weighted to appear roughly twice as often as any other type, so most sessions still feel like the original game — the other five are the escalation on top.</p>
+        <code class="mono app-cmd">delivery · delivery · circuit · steal · ram · escort</code>
+      </div>
+    </div>
+  </section>
+
+  <section class="section closing" aria-labelledby="close-h">
+    <div class="closing-bg" aria-hidden="true"><div class="grid-floor floor-up"></div></div>
+    <div class="wrap closing-wrap">
+      <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>the board is posting</p>
+      <h2 id="close-h" class="display closing-h reveal">Take the job.<br><span class="grad">Beat the clock.</span></h2>
+      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <p class="closing-note mono reveal">One active mission · a fresh one posts automatically</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <p class="brand footer-logo"><span class="brand-dot" aria-hidden="true"></span><span class="brand-name">Local Theft Auto</span></p>
+      <p class="footer-desc">A top-down city that runs entirely in your browser tab. One canvas, one script, zero network calls — the only thing you can steal is the high score.</p>
+    </div>
+    <nav class="footer-col" aria-label="Explore">
+      <p class="footer-h mono">Explore</p>
+      <a href="world.html">World</a>
+      <a href="driving.html">Vehicles</a>
+      <a href="missions.html">Missions</a>
+      <a href="wanted.html">Wanted</a>
+      <a href="combat.html">Combat</a>
+      <a href="progression.html">Progression</a>
+      <a href="controls.html">Controls</a>
+      <a href="faq.html">FAQ</a>
+    </nav>
+    <div class="footer-col">
+      <p class="footer-h mono">Quick start</p>
+      <p class="footer-cmd mono">WASD — walk / drive</p>
+      <p class="footer-cmd mono">E — enter or exit a car</p>
+      <p class="footer-cmd mono">F — punch or swing</p>
+      <a class="footer-cmd mono" href="game.html">Open game.html →</a>
+    </div>
+  </div>
+  <div class="wrap footer-legal">
+    <p class="mono">© 2026 Local Theft Auto — local by design. Built inside the <a href="about.html">Ollama Chat</a> project.</p>
+    <a class="mono" href="#top">Back to top ↑</a>
+  </div>
+</footer>
+
+<div class="chat-widget">
+  <button class="chat-launcher" id="chatLauncher" type="button"
+          aria-label="Open chat with your local Ollama" aria-expanded="false" aria-controls="chatPanel">
+    <svg class="chat-glyph-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 3.5c-4.9 0-8.5 3.3-8.5 7.6 0 2 .8 3.8 2.1 5.1-.2 1.2-.7 2.4-1.6 3.3 1.6-.1 3.1-.7 4.2-1.4 1.1.4 2.4.6 3.8.6 4.9 0 8.5-3.3 8.5-7.6S16.9 3.5 12 3.5Z"/>
+    </svg>
+    <svg class="chat-glyph-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M6 6l12 12M18 6L6 18"/>
+    </svg>
+  </button>
+  <section class="chat-panel" id="chatPanel" aria-label="Chat with your local Ollama">
+    <header class="chat-head">
+      <span class="chat-status" id="chatStatus" data-state="checking" aria-hidden="true"></span>
+      <div class="chat-head-text">
+        <p class="chat-title">Local chat</p>
+        <p class="chat-sub mono" id="chatSub">reaching 127.0.0.1:11434…</p>
+      </div>
+      <label class="sr-only" for="chatModel">Model</label>
+      <select class="chat-model mono" id="chatModel" disabled></select>
+      <button class="chat-close" id="chatClose" type="button" aria-label="Close chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="chat-log" id="chatLog"></div>
+    <form class="chat-form" id="chatForm">
+      <label class="sr-only" for="chatInput">Message your local model</label>
+      <input class="chat-input" id="chatInput" type="text" placeholder="Ask your local model…" autocomplete="off" enterkeyhint="send">
+      <button class="chat-send" id="chatSend" type="submit" aria-label="Send message">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 12.5v-9M8 3.5 4.5 7M8 3.5 11.5 7"/></svg>
+      </button>
+      <button class="chat-stop" id="chatStop" type="button" hidden>Stop</button>
+    </form>
+    <p class="chat-foot mono">runs on your machine — nothing leaves it</p>
+  </section>
+</div>
+
+<script src="main.js"></script>
+<script src="chat.js"></script>
+</body>
+</html>

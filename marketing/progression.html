@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Progression — Local Theft Auto</title>
+  <meta name="description" content="A persistent high score, five achievements, lifetime stats, and a garage that remembers your car's paint and handling — everything Local Theft Auto saves to your browser, and nothing more.">
+  <meta name="theme-color" content="#07090d">
+  <link rel="stylesheet" href="marketing.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%23ffb224'/%3E%3C/svg%3E">
+</head>
+<body id="top">
+<canvas id="bgfx" aria-hidden="true"></canvas>
+<span class="cursor-dot" aria-hidden="true"></span>
+<span class="nav-indicator" aria-hidden="true"></span>
+<div class="rail" aria-hidden="true"><i class="rail-line"></i><i class="rail-fill"></i></div>
+<div class="shroud" aria-hidden="true">
+  <div class="shroud-plate shroud-plate-tl"><span class="shroud-label mono"></span><span class="shroud-tick"></span></div>
+  <div class="shroud-plate shroud-plate-br"><span class="shroud-tick"></span><span class="shroud-label mono"></span></div>
+</div>
+
+<a class="skip" href="#main">Skip to content</a>
+<div class="noise" aria-hidden="true"></div>
+
+<header id="nav">
+  <div class="nav-shell">
+    <a class="brand" href="index.html" aria-label="Local Theft Auto — home">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <span class="brand-name">Local&nbsp;Theft&nbsp;Auto</span>
+    </a>
+    <nav class="nav-menu" aria-label="Primary">
+      <a href="world.html">World</a>
+      <a href="driving.html">Vehicles</a>
+      <a href="missions.html">Missions</a>
+      <a href="wanted.html">Wanted</a>
+      <a href="combat.html">Combat</a>
+      <a href="progression.html" class="is-active" aria-current="page">Progression</a>
+      <a href="controls.html">Controls</a>
+      <a href="faq.html">FAQ</a>
+      <a class="nav-cta nav-cta-mobile" href="game.html">▶ Play now</a>
+    </nav>
+    <a class="nav-cta" href="game.html">▶ Play now</a>
+    <button class="menu-btn" data-menu-btn aria-label="Menu" aria-expanded="false">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="section page-hero ph-gauge" aria-labelledby="page-h">
+    <div class="hero-bg" aria-hidden="true">
+      <div class="grid-floor"></div>
+      <div class="hero-glow"></div>
+    </div>
+    <div class="wrap">
+      <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>progression</p>
+      <h1 id="page-h" class="display reveal">Getting busted<br><span class="grad">doesn't erase you.</span></h1>
+      <p class="page-lede reveal">This is an endless game: pressing R starts a fresh city and resets your score, but your best run, lifetime stats and unlocked achievements survive it, along with any car you've saved to the garage — all of it living in this browser's <span class="mono-inline">localStorage</span>, nowhere else.</p>
+      <div class="mem-strip" aria-hidden="true"><i class="k-best"></i><i class="k-stats"></i><i class="k-ach"></i><i class="k-garage"></i></div>
+    </div>
+  </section>
+
+  <section class="section facts" aria-label="What persists">
+    <div class="wrap">
+      <dl class="fact-band">
+        <div class="fact reveal">
+          <dt class="fact-label mono">achievements to unlock</dt>
+          <dd class="fact-num display"><span data-count="5">5</span></dd>
+        </div>
+        <div class="fact reveal">
+          <dt class="fact-label mono">localStorage keys used, total</dt>
+          <dd class="fact-num display"><span data-count="4">4</span></dd>
+        </div>
+        <div class="fact reveal">
+          <dt class="fact-label mono">deliveries needed for Courier</dt>
+          <dd class="fact-num display"><span data-count="5">5</span></dd>
+        </div>
+        <div class="fact reveal">
+          <dt class="fact-label mono">servers that ever see your save</dt>
+          <dd class="fact-num display"><span data-count="0">0</span></dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ==================================================== achievements -->
+  <section class="section features" aria-labelledby="ach-h">
+    <div class="wrap port reveal-depth">
+      <div class="sec-head reveal-depth">
+        <span class="ch-num" aria-hidden="true">01</span>
+        <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>five to chase</p>
+        <h2 id="ach-h" class="display reveal-scan">Achievements, <span class="grad">unlocked once, kept forever.</span></h2>
+      </div>
+      <ul class="proof-list medal-list">
+        <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text"><strong>First Steal</strong> — borrow your first car.</span></li>
+        <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text"><strong>Drifter</strong> — lay down 5 kilometers of skid marks across every drift you've ever pulled.</span></li>
+        <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text"><strong>Most Wanted</strong> — survive 20 total seconds at five stars.</span></li>
+        <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text"><strong>Courier</strong> — complete 5 missions.</span></li>
+        <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text"><strong>Collector</strong> — save your first car to the garage.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ======================================================= save data -->
+  <section class="section" aria-labelledby="save-h">
+    <div class="wrap privacy-grid">
+      <div class="privacy-copy">
+        <h2 id="save-h" class="display reveal">What's actually <span class="grad">in your save.</span></h2>
+        <ul class="proof-list">
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Your all-time best score — shown on the HUD stat line every run, never reset by R.</span></li>
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Lifetime stats: total steals, deliveries, distance drifted, seconds spent at five stars, and cars saved to the garage.</span></li>
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Which of the five achievements you've unlocked, permanently.</span></li>
+          <li class="reveal"><span class="proof-mark" aria-hidden="true"></span><span class="proof-text">Your garage-saved car's accel, top speed, grip, paint color and health — one JSON object, one car.</span></li>
+        </ul>
+        <p class="honest reveal">The honest footnote: it's <span class="mono-inline">localStorage</span>, scoped to this browser on this machine. Clear site data, switch browsers, or open a private window, and it's gone — there's no account or cloud sync to fall back on.</p>
+      </div>
+      <div class="app-card reveal" style="max-width: 420px;">
+        <span class="app-tag mono">on disk, sort of</span>
+        <h3 class="b-title">Four keys, nothing else</h3>
+        <p>The entire save file is four small <span class="mono-inline">localStorage</span> entries — best score, lifetime stats, unlocked achievements, and the garage car. No account, no cloud, no sync service to trust.</p>
+        <code class="mono app-cmd">lta-best</code>
+        <code class="mono app-cmd">lta-stats</code>
+        <code class="mono app-cmd">lta-achievements</code>
+        <code class="mono app-cmd">lta-garage</code>
+      </div>
+    </div>
+  </section>
+
+  <section class="section closing" aria-labelledby="close-h">
+    <div class="closing-bg" aria-hidden="true"><div class="grid-floor floor-up"></div></div>
+    <div class="wrap closing-wrap">
+      <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>your best run is waiting</p>
+      <h2 id="close-h" class="display closing-h reveal">Beat your best.<br><span class="grad">It remembers.</span></h2>
+      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <p class="closing-note mono reveal">R for a fresh city · your save always comes along</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <p class="brand footer-logo"><span class="brand-dot" aria-hidden="true"></span><span class="brand-name">Local Theft Auto</span></p>
+      <p class="footer-desc">A top-down city that runs entirely in your browser tab. One canvas, one script, zero network calls — the only thing you can steal is the high score.</p>
+    </div>
+    <nav class="footer-col" aria-label="Explore">
+      <p class="footer-h mono">Explore</p>
+      <a href="world.html">World</a>
+      <a href="driving.html">Vehicles</a>
+      <a href="missions.html">Missions</a>
+      <a href="wanted.html">Wanted</a>
+      <a href="combat.html">Combat</a>
+      <a href="progression.html">Progression</a>
+      <a href="controls.html">Controls</a>
+      <a href="faq.html">FAQ</a>
+    </nav>
+    <div class="footer-col">
+      <p class="footer-h mono">Quick start</p>
+      <p class="footer-cmd mono">WASD — walk / drive</p>
+      <p class="footer-cmd mono">E — enter or exit a car</p>
+      <p class="footer-cmd mono">F — punch or swing</p>
+      <a class="footer-cmd mono" href="game.html">Open game.html →</a>
+    </div>
+  </div>
+  <div class="wrap footer-legal">
+    <p class="mono">© 2026 Local Theft Auto — local by design. Built inside the <a href="about.html">Ollama Chat</a> project.</p>
+    <a class="mono" href="#top">Back to top ↑</a>
+  </div>
+</footer>
+
+<div class="chat-widget">
+  <button class="chat-launcher" id="chatLauncher" type="button"
+          aria-label="Open chat with your local Ollama" aria-expanded="false" aria-controls="chatPanel">
+    <svg class="chat-glyph-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 3.5c-4.9 0-8.5 3.3-8.5 7.6 0 2 .8 3.8 2.1 5.1-.2 1.2-.7 2.4-1.6 3.3 1.6-.1 3.1-.7 4.2-1.4 1.1.4 2.4.6 3.8.6 4.9 0 8.5-3.3 8.5-7.6S16.9 3.5 12 3.5Z"/>
+    </svg>
+    <svg class="chat-glyph-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M6 6l12 12M18 6L6 18"/>
+    </svg>
+  </button>
+  <section class="chat-panel" id="chatPanel" aria-label="Chat with your local Ollama">
+    <header class="chat-head">
+      <span class="chat-status" id="chatStatus" data-state="checking" aria-hidden="true"></span>
+      <div class="chat-head-text">
+        <p class="chat-title">Local chat</p>
+        <p class="chat-sub mono" id="chatSub">reaching 127.0.0.1:11434…</p>
+      </div>
+      <label class="sr-only" for="chatModel">Model</label>
+      <select class="chat-model mono" id="chatModel" disabled></select>
+      <button class="chat-close" id="chatClose" type="button" aria-label="Close chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="chat-log" id="chatLog"></div>
+    <form class="chat-form" id="chatForm">
+      <label class="sr-only" for="chatInput">Message your local model</label>
+      <input class="chat-input" id="chatInput" type="text" placeholder="Ask your local model…" autocomplete="off" enterkeyhint="send">
+      <button class="chat-send" id="chatSend" type="submit" aria-label="Send message">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 12.5v-9M8 3.5 4.5 7M8 3.5 11.5 7"/></svg>
+      </button>
+      <button class="chat-stop" id="chatStop" type="button" hidden>Stop</button>
+    </form>
+    <p class="chat-foot mono">runs on your machine — nothing leaves it</p>
+  </section>
+</div>
+
+<script src="main.js"></script>
+<script src="chat.js"></script>
+</body>
+</html>
