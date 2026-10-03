@@ -59,6 +59,7 @@
     sidebarToggle: document.getElementById('sidebarToggle'),
     chatList: document.getElementById('chatList'),
     newChatBtn: document.getElementById('newChatBtn'),
+    searchInput: document.getElementById('searchInput'),
     statusDot: document.getElementById('statusDot'),
     statusText: document.getElementById('statusText'),
     settingsBtn: document.getElementById('settingsBtn'),
@@ -1286,6 +1287,34 @@
 
   // ---------- Sidebar / chats ----------
   el.newChatBtn.addEventListener('click', createChat);
+
+  // ---------- Sidebar search ----------
+  // Debounced server-side search over the user's sessions (titles and
+  // message contents). An empty query restores the normal full list.
+  let searchTimer = null;
+  el.searchInput?.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      const q = el.searchInput.value.trim();
+      if (!q) {
+        try {
+          await refreshChatList();
+        } catch (err) {
+          showError(err.message);
+        }
+        renderChatList();
+        return;
+      }
+      try {
+        const data = await apiRequest(`/api/sessions/search?q=${encodeURIComponent(q)}`);
+        chats = data.sessions || [];
+        renderChatList();
+      } catch (err) {
+        showError(err.message);
+      }
+    }, 250);
+  });
+
   el.clearChatBtn.addEventListener('click', async () => {
     const chat = activeSession;
     if (!chat) return;

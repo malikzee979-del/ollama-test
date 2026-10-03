@@ -84,6 +84,26 @@ function listSessions(userId) {
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
+// Search the user's sessions by a case-insensitive substring over the
+// title and message contents. Returns the same summaries as listSessions
+// (newest-updated first) for every matching session. A linear scan is
+// deliberate — fine at the documented scale (see TODO 5.2's storage
+// ceiling); no index, no dependency.
+function searchSessions(userId, query) {
+  const q = String(query).trim().toLowerCase();
+  if (!q) return [];
+  return Object.values(sessions)
+    .filter((s) => s.userId === userId)
+    .filter((s) => {
+      if (typeof s.title === 'string' && s.title.toLowerCase().includes(q)) return true;
+      return (s.messages || []).some(
+        (m) => typeof m.content === 'string' && m.content.toLowerCase().includes(q)
+      );
+    })
+    .map(toSummary)
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+}
+
 // Get a full session (including messages) by id, scoped to `userId`.
 // Returns undefined if it doesn't exist or belongs to a different user.
 function getSession(id, userId) {
@@ -161,6 +181,7 @@ function deleteSession(id, userId) {
 module.exports = {
   DATA_FILE,
   listSessions,
+  searchSessions,
   getSession,
   createSession,
   updateSession,

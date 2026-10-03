@@ -672,6 +672,19 @@ app.post('/api/sessions', (req, res) => {
   }
 });
 
+// Search the user's sessions by a case-insensitive substring over titles
+// and message contents. Registered BEFORE /api/sessions/:id so "search"
+// can never be mistaken for a session id.
+app.get('/api/sessions/search', (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ error: 'Missing "q" query parameter.' });
+  try {
+    res.json({ sessions: db.searchSessions(req.user.id, q) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get a single session, including its full messages.
 app.get('/api/sessions/:id', (req, res) => {
   try {

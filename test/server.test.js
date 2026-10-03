@@ -314,3 +314,39 @@ test('requests with a disallowed Host header are rejected', async () => {
   });
   assert.equal(status, 403);
 });
+
+// --- chat search ------------------------------------------------------------
+
+test('GET /api/sessions/search finds sessions by title and content, per user', async () => {
+  // The before() hook already created "Test session" (later renamed
+  // "Renamed" by the PATCH test) and appended "hello" as a message.
+  const titleRes = await fetch(`${baseUrl}/api/sessions/search?q=renamed`, {
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(titleRes.status, 200);
+  const titleBody = await titleRes.json();
+  assert.ok(titleBody.sessions.some((s) => s.id === sessionId), 'title match must include the session');
+  assert.equal('messages' in titleBody.sessions[0], false, 'summaries only, no messages');
+
+  const contentRes = await fetch(`${baseUrl}/api/sessions/search?q=HELLO`, {
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(contentRes.status, 200);
+  const contentBody = await contentRes.json();
+  assert.ok(contentBody.sessions.some((s) => s.id === sessionId), 'content match must be case-insensitive');
+});
+
+test('GET /api/sessions/search rejects a missing query and yields nothing for other users', async () => {
+  const missing = await fetch(`${baseUrl}/api/sessions/search`, { headers: { Cookie: sessionCookie } });
+  assert.equal(missing.status, 400);
+
+  const nomatch = await fetch(`${baseUrl}/api/sessions/search?q=zzz-no-such-content`, {
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(nomatch.status, 200);
+  assert.deepEqual(await nomatch.json(), { sessions: [] });
+
+  // "search" must never be treated as a session id by /api/sessions/:id.
+  const asId = await fetch(`${baseUrl}/api/sessions/search`, { headers: { Cookie: sessionCookie } });
+  assert.equal(asId.status, 400);
+});

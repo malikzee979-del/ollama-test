@@ -152,3 +152,40 @@ test('a corrupt data file is recovered from by starting with an empty store', ()
   process.env.SESSIONS_DATA_FILE = path.join(tmpDir, 'sessions.json');
   require('../db');
 });
+
+// --- searchSessions (chat search) -----------------------------------------
+
+test('searchSessions matches titles and message contents case-insensitively, scoped per user', () => {
+  const hitTitle = db.createSession(7, 'Quarterly planning');
+  const hitContent = db.createSession(7, 'Random');
+  db.updateSession(hitContent.id, 7, {
+    appendMessages: [{ role: 'user', content: 'Tell me about the QUARTERLY report.' }],
+  });
+  db.createSession(7, 'Unrelated');
+  const otherUser = db.createSession(8, 'Quarterly planning for user 8');
+
+  const results = db.searchSessions(7, 'quarterly');
+  assert.deepEqual(
+    results.map((s) => s.id).sort(),
+    [hitTitle.id, hitContent.id].sort(),
+    'matches from title and content, same user only'
+  );
+  // The other user's identical title must never leak in.
+  assert.deepEqual(db.searchSessions(8, 'quarterly').map((s) => s.id), [otherUser.id]);
+
+  // Summaries only — no message payloads.
+  assert.equal('messages' in results[0], false);
+});
+
+test('searchSessions returns [] for a blank query and sorts newest-updated first', () => {
+  assert.deepEqual(db.searchSessions(7, ''), []);
+  assert.deepEqual(db.searchSessions(7, '   '), []);
+
+  const first = db.createSession(7, 'alpha one');
+  const second = db.createSession(7, 'alpha two');
+  // Touch the first so its updatedAt is newest; it must come back first.
+  db.updateSession(first.id, 7, { title: 'alpha one (touched)' });
+
+  const results = db.searchSessions(7, 'alpha');
+  assert.deepEqual(results.map((s) => s.id), [first.id, second.id]);
+});
