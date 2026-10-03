@@ -422,6 +422,69 @@ function injectMemoryMessage(messages, memoryContent) {
   return [memoryMessage, ...messages];
 }
 
+// Shared plumbing for the two ndjson streaming proxies (/api/chat and
+// /api/pull): fetches the upstream Ollama endpoint with an abort signal tied
+// to the client connection (browser aborts tear the upstream request down),
+// validates the response, sets the ndjson headers, and pumps chunks through
+// with an EPIPE guard. Routes customize via `onChunk`/`onDone` observers —
+// e.g. /api/chat accumulates the assistant reply for memory auto-indexing.
+// Returns { aborted: true } if the client hung up before the upstream
+// request was even made; upstream/status errors are answered on `res`
+// directly.
+async function pipeUpstreamNdjson({ res, path: upstreamPath, body, onChunk, onDone }) {
+  const upstreamController = new AbortController();
+  res.on('close', () => upstreamController.abort());
+
+  let upstream;
+  try {
+    upstream = await fetch(`${OLLAMA_HOST}${upstreamPath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: upstreamController.signal,
+    });
+  } catch (err) {
+    if (upstreamController.signal.aborted) {
+      if (!res.writableEnded) res.end();
+      return { aborted: true };
+    }
+    res.status(503).json({ error: `Cannot reach Ollama at ${OLLAMA_HOST}: ${err.message}` });
+    return { failed: true };
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    const text = await upstream.text().catch(() => '');
+    res.status(upstream.status || 502).json({ error: text || 'Upstream error from Ollama.' });
+    return { failed: true };
+  }
+
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+  // If the client goes away mid-stream, writing further chunks can raise an
+  // EPIPE/ECONNRESET 'error' event on the response; without a listener that
+  // would bubble up as an unhandled exception and crash the process.
+  res.on('error', () => {});
+
+  const reader = upstream.body.getReader();
+  res.on('close', () => reader.cancel().catch(() => {}));
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(value);
+      if (onChunk) onChunk(value);
+    }
+  } catch (err) {
+    // Client likely disconnected or upstream dropped; nothing more to do.
+  } finally {
+    if (onDone) onDone();
+    if (!res.writableEnded) res.end();
+  }
+  return { streamed: true };
+}
+
 app.post('/api/chat', async (req, res) => {
   const { model, messages, options, keep_alive, useMemory } = req.body || {};
 
@@ -481,47 +544,12 @@ app.post('/api/chat', async (req, res) => {
     }
   }
 
-  // Tied to the client connection: if the browser aborts (Stop button, tab
-  // close, network drop), this immediately tears down the upstream request
-  // to Ollama too, instead of leaving it to generate in the background where
-  // it keeps burning CPU/RAM the user was trying to reclaim.
-  const upstreamController = new AbortController();
-  res.on('close', () => upstreamController.abort());
-
-  let upstream;
-  try {
-    upstream = await fetch(`${OLLAMA_HOST}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: messagesToSend, options, keep_alive, stream: true }),
-      signal: upstreamController.signal,
-    });
-  } catch (err) {
-    if (upstreamController.signal.aborted) return res.end();
-    return res.status(503).json({ error: `Cannot reach Ollama at ${OLLAMA_HOST}: ${err.message}` });
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    const text = await upstream.text().catch(() => '');
-    return res.status(upstream.status || 502).json({ error: text || 'Upstream error from Ollama.' });
-  }
-
-  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('X-Accel-Buffering', 'no');
-  if (wasCompacted) res.setHeader('X-Compacted', 'true');
-  // If the client goes away mid-stream, writing further chunks can raise an
-  // EPIPE/ECONNRESET 'error' event on the response; without a listener that
-  // would bubble up as an unhandled exception and crash the process.
-  res.on('error', () => {});
-
-  const reader = upstream.body.getReader();
-  res.on('close', () => reader.cancel().catch(() => {}));
-
-  // When useMemory is on, accumulate the assistant's reply from the ndjson
-  // stream (parse errors are ignored — indexing is best-effort) so the
-  // completed turn can be auto-indexed below, exactly like a manual
-  // /api/memory/index call would.
+  // The streaming plumbing (fetch, ndjson headers, chunk pump) is shared
+  // with /api/pull via pipeUpstreamNdjson. This route only supplies the
+  // memory-specific observers: onChunk accumulates the assistant's reply
+  // from the ndjson stream (parse errors are ignored — indexing is
+  // best-effort) so the completed turn can be auto-indexed below, exactly
+  // like a manual /api/memory/index call would.
   const memoryDecoder = useMemory === true ? new TextDecoder() : null;
   let ndjsonBuffer = '';
   let assistantText = '';
@@ -534,34 +562,37 @@ app.post('/api/chat', async (req, res) => {
     });
   };
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(value);
-      if (memoryDecoder) {
-        ndjsonBuffer += memoryDecoder.decode(value, { stream: true });
-        const lines = ndjsonBuffer.split('\n');
-        ndjsonBuffer = lines.pop();
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const obj = JSON.parse(line);
-            if (obj && obj.message && typeof obj.message.content === 'string') {
-              assistantText += obj.message.content;
+  // X-Compacted must be set before the first byte is written, which
+  // pipeUpstreamNdjson does only after its own setHeader calls — but the
+  // header is set here (before the call) so the helper stays response-shape
+  // agnostic.
+  if (wasCompacted) res.setHeader('X-Compacted', 'true');
+
+  await pipeUpstreamNdjson({
+    res,
+    path: '/api/chat',
+    body: { model, messages: messagesToSend, options, keep_alive, stream: true },
+    onChunk:
+      memoryDecoder
+        ? (value) => {
+            ndjsonBuffer += memoryDecoder.decode(value, { stream: true });
+            const lines = ndjsonBuffer.split('\n');
+            ndjsonBuffer = lines.pop();
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const obj = JSON.parse(line);
+                if (obj && obj.message && typeof obj.message.content === 'string') {
+                  assistantText += obj.message.content;
+                }
+              } catch {
+                // Partial or malformed line — indexing is best-effort; skip it.
+              }
             }
-          } catch {
-            // Partial or malformed line — indexing is best-effort; skip it.
           }
-        }
-      }
-    }
-  } catch (err) {
-    // Client likely disconnected or upstream dropped; nothing more to do.
-  } finally {
-    autoIndexCompletedTurn();
-    if (!res.writableEnded) res.end();
-  }
+        : undefined,
+    onDone: autoIndexCompletedTurn,
+  });
 });
 
 // Pull a model with streaming progress.
@@ -583,47 +614,11 @@ app.post('/api/pull', modelPullRateLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Invalid "name": must not exceed 256 characters.' });
   }
 
-  const upstreamController = new AbortController();
-  res.on('close', () => upstreamController.abort());
-
-  let upstream;
-  try {
-    upstream = await fetch(`${OLLAMA_HOST}/api/pull`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmedName, stream: true }),
-      signal: upstreamController.signal,
-    });
-  } catch (err) {
-    if (upstreamController.signal.aborted) return res.end();
-    return res.status(503).json({ error: `Cannot reach Ollama at ${OLLAMA_HOST}: ${err.message}` });
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    const text = await upstream.text().catch(() => '');
-    return res.status(upstream.status || 502).json({ error: text || 'Upstream error from Ollama.' });
-  }
-
-  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache');
-  // See /api/chat: guard against unhandled 'error' events from writing to a
-  // response whose client has already disconnected.
-  res.on('error', () => {});
-
-  const reader = upstream.body.getReader();
-  res.on('close', () => reader.cancel().catch(() => {}));
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(value);
-    }
-  } catch (err) {
-    // ignore
-  } finally {
-    if (!res.writableEnded) res.end();
-  }
+  await pipeUpstreamNdjson({
+    res,
+    path: '/api/pull',
+    body: { name: trimmedName, stream: true },
+  });
 });
 
 // Delete a model.
