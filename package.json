@@ -19,6 +19,9 @@
     "@qdrant/js-client-rest": "^1.19.0",
     "express": "^4.19.2"
   },
+  "overrides": {
+    "undici": "^7.29.1"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "electron": "^43.4.0",
