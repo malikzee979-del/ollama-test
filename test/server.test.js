@@ -248,3 +248,69 @@ test('POST /api/memory/index is rate-limited per IP', async () => {
     })
   );
 });
+
+// --- security hardening --------------------------------------------------
+
+test('a malformed percent-encoded cookie does not crash the request', async () => {
+  // `sid=%` used to throw URIError inside parseCookies() and 500 every
+  // request carrying it; the malformed pair must be skipped instead.
+  const res = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { Cookie: 'sid=%; broken=%zz' },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { user: null });
+});
+
+test('POST /api/chat rejects a messages array with malformed items', async () => {
+  const res = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
+    body: JSON.stringify({ model: 'llama3', messages: [{ role: 'user' }] }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.match(body.error, /role.*content/i);
+});
+
+test('POST /api/chat rejects non-object message items', async () => {
+  const res = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
+    body: JSON.stringify({ model: 'llama3', messages: ['hello'] }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('rateLimiter evicts a key once its window is empty', () => {
+  // app.rateLimiterForTests is a test-only export of the factory; the
+  // middleware instance carries its hits Map so eviction can be asserted
+  // without waiting out a real window. The triggering request comes from a
+  // different IP than the seeded stale key — a request from the same IP
+  // would legitimately refresh the key.
+  const limiter = app.rateLimiterForTests({ windowMs: 50, max: 2 });
+  const now = Date.now();
+  limiter.hits.set('dormant-ip', [now - 60_000]); // all timestamps out of window
+  let called = false;
+  limiter({ ip: 'fresh-ip' }, {}, () => {
+    called = true;
+  });
+  assert.ok(called, 'a fresh ip must not be limited');
+  assert.ok(!limiter.hits.has('dormant-ip'), 'the dormant key must be swept from the map');
+  assert.ok(limiter.hits.has('fresh-ip'), 'the fresh ip must be recorded');
+});
+
+test('requests with a disallowed Host header are rejected', async () => {
+  // The Host header can't be overridden through fetch/undici, so use
+  // node:http directly.
+  const { request } = require('node:http');
+  const port = server.address().port;
+  const status = await new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path: '/api/auth/me', headers: { Host: 'evil.example' } }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(status, 403);
+});

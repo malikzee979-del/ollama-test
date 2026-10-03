@@ -101,6 +101,49 @@ async function summarizeWithOllama(messagesToSummarize, model) {
   return (data && data.message && data.message.content) || '';
 }
 
+// Host-header guard. A page on another origin can make this server's
+// cookie-authenticated endpoints fire cross-origin via DNS rebinding (the
+// browser resolves a hostile domain to 127.0.0.1 and the cookie rides
+// along). Rejecting any Host outside loopback closes that; additional
+// hosts — e.g. a LAN hostname so another machine can reach the app — go in
+// HOST_ALLOWLIST as a comma-separated list.
+const HOST_ALLOWLIST = new Set(
+  (process.env.HOST_ALLOWLIST || '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+function isAllowedHost(hostHeader) {
+  if (typeof hostHeader !== 'string' || !hostHeader.trim()) return false;
+  let host = hostHeader.trim().toLowerCase();
+  // Strip the port. IPv6 arrives bracketed ("[::1]:4173"); for anything
+  // else only strip a trailing :port when the remainder is colon-free, so
+  // an unbracketed "::1" survives intact.
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']');
+    if (end !== -1) host = host.slice(1, end);
+  } else {
+    const m = /^(.+):(\d+)$/.exec(host);
+    if (m && !m[1].includes(':')) host = m[1];
+  }
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '::ffff:127.0.0.1') {
+    return true;
+  }
+  return HOST_ALLOWLIST.has(host);
+}
+
+// Registered right after request logging (so rejections are still logged)
+// and before cookie parsing / every route, including static files.
+app.use((req, res, next) => {
+  if (!isAllowedHost(req.headers.host)) {
+    return res.status(403).json({
+      error: `Host "${req.headers.host || '(missing)'}" is not allowed. Add it to HOST_ALLOWLIST if this is intentional.`,
+    });
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 
 // --- Auth (local, SQLite-backed) ---------------------------------------
@@ -116,7 +159,16 @@ function parseCookies(req) {
     if (idx === -1) continue;
     const name = pair.slice(0, idx).trim();
     const value = pair.slice(idx + 1).trim();
-    if (name) cookies[name] = decodeURIComponent(value);
+    if (name) {
+      // decodeURIComponent throws URIError on malformed percent-encoding
+      // (e.g. `Cookie: sid=%`); a single hostile cookie header must not turn
+      // every request into a 500, so skip the malformed pair instead.
+      try {
+        cookies[name] = decodeURIComponent(value);
+      } catch {
+        // Intentionally empty: a bad value is indistinguishable from absent.
+      }
+    }
   }
   return cookies;
 }
@@ -162,8 +214,22 @@ app.use((req, res, next) => {
 // its purpose.
 function rateLimiter({ windowMs, max }) {
   const hits = new Map(); // ip -> [timestamps]
-  return (req, res, next) => {
+  let lastSweep = 0;
+  const middleware = (req, res, next) => {
     const now = Date.now();
+    // Opportunistic sweep, at most once per window: a key whose last request
+    // is long gone would otherwise sit in `hits` forever, so `hits` grows
+    // without bound as clients churn. The sweep is cheap here (the map only
+    // ever holds one entry per IP) and evicts dormant keys on the next
+    // request after their window drains.
+    if (now - lastSweep > windowMs) {
+      lastSweep = now;
+      for (const [key, stamps] of hits) {
+        const alive = stamps.filter((t) => now - t < windowMs);
+        if (alive.length > 0) hits.set(key, alive);
+        else hits.delete(key);
+      }
+    }
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const timestamps = (hits.get(ip) || []).filter((t) => now - t < windowMs);
     if (timestamps.length >= max) {
@@ -175,6 +241,9 @@ function rateLimiter({ windowMs, max }) {
     hits.set(ip, timestamps);
     next();
   };
+  // Test-only handle: lets the suite assert eviction without a clock.
+  middleware.hits = hits;
+  return middleware;
 }
 
 const authRateLimiter = rateLimiter({ windowMs: 5 * 60 * 1000, max: 10 });
@@ -302,11 +371,18 @@ app.post('/api/show', async (req, res) => {
 
 // Streaming chat proxy. Forwards newline-delimited JSON chunks from Ollama
 // straight through to the browser as they arrive.
+// Shape check shared by /api/sessions/:id PATCH and /api/chat: every
+// message must carry a string "role" and a string "content".
+const isValidMessage = (m) => m && typeof m === 'object' && typeof m.role === 'string' && typeof m.content === 'string';
+
 app.post('/api/chat', async (req, res) => {
   const { model, messages, options, keep_alive } = req.body || {};
 
   if (!model) return res.status(400).json({ error: 'Missing "model" in request body.' });
   if (!Array.isArray(messages)) return res.status(400).json({ error: '"messages" must be an array.' });
+  if (!messages.every(isValidMessage)) {
+    return res.status(400).json({ error: 'Each item in "messages" must have string "role" and "content".' });
+  }
 
   // Pre-process the outgoing messages: if the conversation has grown too
   // large, fold older turns into a compact summary before forwarding to
@@ -514,7 +590,6 @@ app.patch('/api/sessions/:id', (req, res) => {
   if (appendMessages !== undefined && !Array.isArray(appendMessages)) {
     return res.status(400).json({ error: '"appendMessages" must be an array.' });
   }
-  const isValidMessage = (m) => m && typeof m === 'object' && typeof m.role === 'string' && typeof m.content === 'string';
   if (Array.isArray(messages) && !messages.every(isValidMessage)) {
     return res.status(400).json({ error: 'Each item in "messages" must have string "role" and "content".' });
   }
@@ -650,5 +725,9 @@ if (require.main === module) {
 // Exposed for tests only (e.g. asserting the compaction timeout behavior
 // without spinning up a real Ollama instance); not used by any route above.
 app.summarizeWithOllama = summarizeWithOllama;
+
+// Test-only: the rate-limiter factory, so the suite can assert key eviction
+// without waiting out a real window.
+app.rateLimiterForTests = rateLimiter;
 
 module.exports = app;

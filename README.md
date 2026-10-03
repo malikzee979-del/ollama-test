@@ -43,6 +43,20 @@ or network — do not expose it directly to the internet. `/api/pull` and
 `DELETE /api/models/:name` in particular let any logged-in user pull or
 delete models on the host with no extra confirmation.
 
+By default the server only answers requests whose `Host` header is a
+loopback address (`localhost`, `127.0.0.1`, `::1`). This closes DNS
+rebinding, where a page on a hostile site resolves its own domain to
+`127.0.0.1` and makes your browser fire the app's cookie-authenticated
+endpoints cross-origin. To reach the app from another machine (e.g. over a
+trusted LAN), add its hostnames to the allowlist:
+
+```bash
+HOST_ALLOWLIST=mybox.local,mybox.example npm start
+```
+
+The rate limiters' IP keys are swept opportunistically (at most once per
+window) so abandoned clients don't grow server memory without bound.
+
 ## Setup
 
 ```bash
