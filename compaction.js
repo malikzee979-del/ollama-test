@@ -16,6 +16,13 @@
 // re-summarizing content that's already been folded into a summary.
 const MARKER = '[compacted-summary]';
 
+// No real tokenizer dependency (see DEFAULTS.maxChars below): 4 characters
+// per token is the rough ratio this module's trigger is calibrated on, and
+// it is exported so anything else showing a token figure to the user —
+// public/app.js's context meter — reports the same numbers the compaction
+// trigger is reasoning about, rather than a second, differing guess.
+const CHARS_PER_TOKEN = 4;
+
 const DEFAULTS = {
   keepRecent: 8,
   maxMessages: 40,
@@ -32,6 +39,21 @@ function totalChars(messages) {
     sum += (m && typeof m.content === 'string') ? m.content.length : 0;
   }
   return sum;
+}
+
+/**
+ * Rough token estimate for a string or a messages array, using the
+ * CHARS_PER_TOKEN heuristic above. Deliberately an estimate: it is used
+ * for "should we compact" / "how full is the window" judgements, never as
+ * a hard cap.
+ *
+ * @param {string|Array<{content?: string}>} input
+ * @returns {number} Estimated token count (0 for anything unrecognized).
+ */
+function estimateTokens(input) {
+  if (typeof input === 'string') return Math.ceil(input.length / CHARS_PER_TOKEN);
+  if (Array.isArray(input)) return Math.ceil(totalChars(input) / CHARS_PER_TOKEN);
+  return 0;
 }
 
 function isMarkerMessage(m) {
@@ -133,4 +155,4 @@ async function compactMessages({
   ];
 }
 
-module.exports = { compactMessages, MARKER, DEFAULTS };
+module.exports = { compactMessages, estimateTokens, MARKER, DEFAULTS, CHARS_PER_TOKEN };

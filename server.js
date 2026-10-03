@@ -1,8 +1,8 @@
 const express = require('express');
 const path = require('path');
-const os = require('os');
 const crypto = require('crypto');
 const db = require('./db');
+const auth = require('./auth');
 const logger = require('./logger');
 const metrics = require('./metrics');
 const qdrant = require('./qdrant');
@@ -46,29 +46,53 @@ const COMPACTION_MAX_CHARS = Number(process.env.COMPACTION_MAX_CHARS) || COMPACT
 const COMPACTION_KEEP_RECENT = Number(process.env.COMPACTION_KEEP_RECENT) || COMPACTION_DEFAULTS.keepRecent;
 const COMPACTION_MODEL = process.env.COMPACTION_MODEL || null;
 
+// Size caps for /api/sessions/:id PATCH bodies, beyond the global 10mb JSON
+// limit — bounds how large a single session/title/message can grow.
+const MAX_SESSION_TITLE_CHARS = 200;
+const MAX_SESSION_MESSAGES = 1000;
+const MAX_MESSAGE_CONTENT_CHARS = 1000000;
+
+// Batch/size caps for /api/memory/index.
+const MAX_MEMORY_BATCH = 100;
+const MAX_MEMORY_TEXT_CHARS = 100000;
+
+// Ollama's non-streaming summarization call (below) has no inherent
+// timeout; without one, a hung Ollama would stall the otherwise-streaming
+// /api/chat request indefinitely before the real response even starts.
+const COMPACTION_TIMEOUT_MS = Number(process.env.COMPACTION_TIMEOUT_MS) || 30000;
+
 // Calls Ollama's non-streaming chat endpoint to produce a concise summary
 // of a slice of older messages. Injected into compactMessages() so the
 // compaction logic itself stays free of any HTTP/Ollama specifics.
 async function summarizeWithOllama(messagesToSummarize, model) {
   const summaryModel = COMPACTION_MODEL || model;
-  const r = await fetch(`${OLLAMA_HOST}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: summaryModel,
-      stream: false,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Summarize the following conversation turns concisely and factually. ' +
-            'Capture key facts, decisions made, and any unresolved questions. ' +
-            'Do not add commentary or restate this instruction; output only the summary.',
-        },
-        ...messagesToSummarize,
-      ],
-    }),
-  });
+  let r;
+  try {
+    r = await fetch(`${OLLAMA_HOST}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: summaryModel,
+        stream: false,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Summarize the following conversation turns concisely and factually. ' +
+              'Capture key facts, decisions made, and any unresolved questions. ' +
+              'Do not add commentary or restate this instruction; output only the summary.',
+          },
+          ...messagesToSummarize,
+        ],
+      }),
+      signal: AbortSignal.timeout(COMPACTION_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+      throw new Error(`Ollama summarization timed out after ${COMPACTION_TIMEOUT_MS}ms.`, { cause: err });
+    }
+    throw err;
+  }
   if (!r.ok) {
     const text = await r.text().catch(() => '');
     throw new Error(`Ollama summarization request failed (status ${r.status}): ${text}`);
@@ -78,18 +102,154 @@ async function summarizeWithOllama(messagesToSummarize, model) {
 }
 
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
 
-// System memory info, used by the frontend to warn before running a model
-// that likely won't fit — this is what almost took the machine down before:
-// a model whose weights exceed available RAM causes heavy swap thrashing
-// rather than a clean "out of memory" error.
-app.get('/api/system', (_req, res) => {
-  res.json({
-    totalMemory: os.totalmem(),
-    freeMemory: os.freemem(),
-  });
+// --- Auth (local, SQLite-backed) ---------------------------------------
+// No cookie-parser dependency: cookies are simple enough to parse by hand,
+// and this keeps the project's minimal-deps footprint (see db.js).
+
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const cookies = {};
+  if (!header) return cookies;
+  for (const pair of header.split(';')) {
+    const idx = pair.indexOf('=');
+    if (idx === -1) continue;
+    const name = pair.slice(0, idx).trim();
+    const value = pair.slice(idx + 1).trim();
+    if (name) cookies[name] = decodeURIComponent(value);
+  }
+  return cookies;
+}
+
+function setSessionCookie(res, token, expiresAt) {
+  const parts = [
+    `${auth.SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Expires=${expiresAt.toUTCString()}`,
+  ];
+  // Only mark the cookie Secure when actually served over HTTPS — this app
+  // runs over plain HTTP on localhost by default, and Secure would stop
+  // the browser from ever sending the cookie back in that case.
+  if (process.env.COOKIE_SECURE === '1') parts.push('Secure');
+  res.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function clearSessionCookie(res) {
+  res.setHeader(
+    'Set-Cookie',
+    `${auth.SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT`
+  );
+}
+
+// Attaches req.user (or leaves it undefined) based on the session cookie.
+// Runs on every request so both API routes and page routes can use it.
+app.use((req, res, next) => {
+  const cookies = parseCookies(req);
+  const token = cookies[auth.SESSION_COOKIE];
+  req.sessionToken = token;
+  req.user = token ? auth.getUserBySessionToken(token) : null;
+  next();
 });
+
+// Simple in-memory fixed-window rate limiter, keyed by client IP. Guards
+// the auth endpoints (brute-forcing a password, or hammering signup to
+// fill the users table) and the model-management / memory-index routes
+// (pulling is expensive on the host, and indexing should stay bounded).
+// Deliberately dependency-free (see db.js for why this project avoids
+// adding packages for small needs); resets on restart, which is fine for
+// its purpose.
+function rateLimiter({ windowMs, max }) {
+  const hits = new Map(); // ip -> [timestamps]
+  return (req, res, next) => {
+    const now = Date.now();
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const timestamps = (hits.get(ip) || []).filter((t) => now - t < windowMs);
+    if (timestamps.length >= max) {
+      const retryAfterSec = Math.ceil((windowMs - (now - timestamps[0])) / 1000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+    }
+    timestamps.push(now);
+    hits.set(ip, timestamps);
+    next();
+  };
+}
+
+const authRateLimiter = rateLimiter({ windowMs: 5 * 60 * 1000, max: 10 });
+
+// Looser limits for the model-management and memory routes: pulling a
+// model downloads gigabytes onto the host (the most expensive action this
+// app can trigger), deleting is destructive, and memory indexing embeds +
+// upserts per item. All still bounded, just less aggressively than auth.
+const modelPullRateLimiter = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
+const modelDeleteRateLimiter = rateLimiter({ windowMs: 5 * 60 * 1000, max: 10 });
+const memoryIndexRateLimiter = rateLimiter({ windowMs: 5 * 60 * 1000, max: 20 });
+
+// Signup: create a user and immediately log them in (sets the session
+// cookie), same as most local-first apps' first-run flow.
+app.post('/api/auth/signup', authRateLimiter, (req, res) => {
+  const { username, password } = req.body || {};
+  try {
+    const user = auth.createUser(username, password);
+    const { token, expiresAt } = auth.createSession(user.id);
+    setSessionCookie(res, token, expiresAt);
+    res.status(201).json({ user });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', authRateLimiter, (req, res) => {
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Missing "username" or "password".' });
+  }
+  const user = auth.verifyUser(username, password);
+  if (!user) return res.status(401).json({ error: 'Invalid username or password.' });
+  const { token, expiresAt } = auth.createSession(user.id);
+  setSessionCookie(res, token, expiresAt);
+  res.json({ user });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  if (req.sessionToken) auth.deleteSession(req.sessionToken);
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  res.json({ user: req.user || null });
+});
+
+// Everything below this point (both pages and API routes) requires a
+// logged-in session, except the static assets needed to render the
+// login/signup pages themselves and the /api/auth/* routes above.
+const PUBLIC_ASSETS = new Set(['/login.html', '/signup.html', '/auth.js', '/style.css']);
+
+app.get(['/', '/index.html'], (req, res, next) => {
+  if (!req.user) return res.redirect('/login.html');
+  next();
+});
+
+app.use((req, res, next) => {
+  // Self-hosted fonts are referenced by style.css's @font-face rules, and
+  // style.css itself is public (needed to render the login/signup pages
+  // before a session exists) — so the font files it points at must be
+  // public too, or the login/signup pages would render with the fallback
+  // system font instead of the ones actually declared.
+  const isPublicFont = req.path.startsWith('/fonts/') && req.path.endsWith('.woff2');
+  if (req.user || req.path.startsWith('/api/auth/') || PUBLIC_ASSETS.has(req.path) || isPublicFont) {
+    return next();
+  }
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  res.redirect('/login.html');
+});
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Simple health check that also verifies Ollama is reachable.
 app.get('/api/health', async (_req, res) => {
@@ -123,11 +283,15 @@ app.get('/api/models', async (_req, res) => {
 
 // Show info for a given model (params, template, etc.)
 app.post('/api/show', async (req, res) => {
+  const { model } = req.body || {};
+  if (typeof model !== 'string' || !model.trim()) {
+    return res.status(400).json({ error: 'Missing "model" in request body.' });
+  }
   try {
     const r = await fetch(`${OLLAMA_HOST}/api/show`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: req.body.model }),
+      body: JSON.stringify({ model }),
     });
     const data = await r.json();
     res.status(r.status).json(data);
@@ -155,6 +319,13 @@ app.post('/api/chat', async (req, res) => {
     maxChars: COMPACTION_MAX_CHARS,
     summarize: (msgs) => summarizeWithOllama(msgs, model),
   });
+
+  // compactMessages() returns the original array reference untouched when
+  // it decides not to compact (or when summarization fails open), so an
+  // identity check is exactly "did older turns get folded into a summary".
+  // Surfaced as a response header so the UI can tell the user their
+  // earlier context was summarized rather than silently dropped.
+  const wasCompacted = compactedMessages !== messages;
 
   // Tied to the client connection: if the browser aborts (Stop button, tab
   // close, network drop), this immediately tears down the upstream request
@@ -184,6 +355,7 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('X-Accel-Buffering', 'no');
+  if (wasCompacted) res.setHeader('X-Compacted', 'true');
   // If the client goes away mid-stream, writing further chunks can raise an
   // EPIPE/ECONNRESET 'error' event on the response; without a listener that
   // would bubble up as an unhandled exception and crash the process.
@@ -206,7 +378,7 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // Pull a model with streaming progress.
-app.post('/api/pull', async (req, res) => {
+app.post('/api/pull', modelPullRateLimiter, async (req, res) => {
   const { name } = req.body || {};
 
   if (typeof name !== 'string' || !name.trim()) {
@@ -216,8 +388,12 @@ app.post('/api/pull', async (req, res) => {
   // Ollama model tags are single tokens like "llama3:8b" — reject anything
   // with whitespace or control characters, which can't be a valid tag and
   // would otherwise be forwarded verbatim to the upstream Ollama API.
+  // eslint-disable-next-line no-control-regex -- the control-char range is the whole point of this check.
   if (/[\s\x00-\x1F\x7F]/.test(trimmedName)) {
     return res.status(400).json({ error: 'Invalid "name": must not contain whitespace or control characters.' });
+  }
+  if (trimmedName.length > 256) {
+    return res.status(400).json({ error: 'Invalid "name": must not exceed 256 characters.' });
   }
 
   const upstreamController = new AbortController();
@@ -264,7 +440,7 @@ app.post('/api/pull', async (req, res) => {
 });
 
 // Delete a model.
-app.delete('/api/models/:name', async (req, res) => {
+app.delete('/api/models/:name', modelDeleteRateLimiter, async (req, res) => {
   try {
     const r = await fetch(`${OLLAMA_HOST}/api/delete`, {
       method: 'DELETE',
@@ -285,11 +461,16 @@ app.delete('/api/models/:name', async (req, res) => {
 // Server-side persistence for chat sessions, stored in a JSON file under
 // ./data/. This is separate from (and currently unused by) the frontend's
 // existing localStorage-based history; see README for details.
+//
+// Every route here is scoped to req.user.id (see db.js) so one account can
+// never read, modify, or delete another account's sessions — this only
+// works because everything below the auth gate in this file already
+// requires req.user to be set.
 
 // List sessions (summaries only — no messages).
-app.get('/api/sessions', (_req, res) => {
+app.get('/api/sessions', (req, res) => {
   try {
-    res.json({ sessions: db.listSessions() });
+    res.json({ sessions: db.listSessions(req.user.id) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -302,7 +483,7 @@ app.post('/api/sessions', (req, res) => {
     return res.status(400).json({ error: '"title" must be a string.' });
   }
   try {
-    const session = db.createSession(title);
+    const session = db.createSession(req.user.id, title);
     res.status(201).json(session);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -312,7 +493,7 @@ app.post('/api/sessions', (req, res) => {
 // Get a single session, including its full messages.
 app.get('/api/sessions/:id', (req, res) => {
   try {
-    const session = db.getSession(req.params.id);
+    const session = db.getSession(req.params.id, req.user.id);
     if (!session) return res.status(404).json({ error: `No session with id "${req.params.id}".` });
     res.json(session);
   } catch (err) {
@@ -341,8 +522,26 @@ app.patch('/api/sessions/:id', (req, res) => {
     return res.status(400).json({ error: 'Each item in "appendMessages" must have string "role" and "content".' });
   }
 
+  // Size limits: shape checks above run first so a malformed item still
+  // reports the shape error rather than a confusing size error.
+  if (typeof title === 'string' && title.length > MAX_SESSION_TITLE_CHARS) {
+    return res.status(400).json({ error: `"title" must not exceed ${MAX_SESSION_TITLE_CHARS} characters.` });
+  }
+  if (Array.isArray(messages) && messages.length > MAX_SESSION_MESSAGES) {
+    return res.status(400).json({ error: `"messages" must not exceed ${MAX_SESSION_MESSAGES} items.` });
+  }
+  if (Array.isArray(appendMessages) && appendMessages.length > MAX_SESSION_MESSAGES) {
+    return res.status(400).json({ error: `"appendMessages" must not exceed ${MAX_SESSION_MESSAGES} items.` });
+  }
+  if (Array.isArray(messages) && messages.some((m) => m.content.length > MAX_MESSAGE_CONTENT_CHARS)) {
+    return res.status(400).json({ error: `Each message "content" in "messages" must not exceed ${MAX_MESSAGE_CONTENT_CHARS} characters.` });
+  }
+  if (Array.isArray(appendMessages) && appendMessages.some((m) => m.content.length > MAX_MESSAGE_CONTENT_CHARS)) {
+    return res.status(400).json({ error: `Each message "content" in "appendMessages" must not exceed ${MAX_MESSAGE_CONTENT_CHARS} characters.` });
+  }
+
   try {
-    const session = db.updateSession(req.params.id, { title, messages, appendMessages });
+    const session = db.updateSession(req.params.id, req.user.id, { title, messages, appendMessages });
     if (!session) return res.status(404).json({ error: `No session with id "${req.params.id}".` });
     res.json(session);
   } catch (err) {
@@ -353,7 +552,7 @@ app.patch('/api/sessions/:id', (req, res) => {
 // Delete a session.
 app.delete('/api/sessions/:id', (req, res) => {
   try {
-    const deleted = db.deleteSession(req.params.id);
+    const deleted = db.deleteSession(req.params.id, req.user.id);
     if (!deleted) return res.status(404).json({ error: `No session with id "${req.params.id}".` });
     res.json({ ok: true });
   } catch (err) {
@@ -365,15 +564,27 @@ app.delete('/api/sessions/:id', (req, res) => {
 // search. Qdrant stores vectors + metadata payloads only — it is not the
 // primary chat-history store. Both routes degrade gracefully: if Qdrant or
 // the embeddings call fails, they return 503 rather than crashing.
+//
+// Every point is tagged with the indexing user's id and search is filtered
+// to that same id, so one account's indexed messages are never returned in
+// another account's search results — same scoping principle as the
+// /api/sessions routes above.
 
 // Index one message (or an array of them) for later semantic search.
 // Body: { id, text, metadata } or an array of such objects.
-app.post('/api/memory/index', async (req, res) => {
+app.post('/api/memory/index', memoryIndexRateLimiter, async (req, res) => {
   const items = Array.isArray(req.body) ? req.body : [req.body];
+
+  if (items.length > MAX_MEMORY_BATCH) {
+    return res.status(400).json({ error: `Batch must not exceed ${MAX_MEMORY_BATCH} items.` });
+  }
 
   for (const item of items) {
     if (!item || typeof item.text !== 'string' || !item.text.trim()) {
       return res.status(400).json({ error: 'Each item requires a non-empty "text" field.' });
+    }
+    if (item.text.length > MAX_MEMORY_TEXT_CHARS) {
+      return res.status(400).json({ error: `Each item's "text" must not exceed ${MAX_MEMORY_TEXT_CHARS} characters.` });
     }
   }
 
@@ -383,7 +594,7 @@ app.post('/api/memory/index', async (req, res) => {
       await qdrant.upsertPoint({
         id: item.id ?? crypto.randomUUID(),
         vector,
-        payload: item.metadata || {},
+        payload: { ...(item.metadata || {}), userId: req.user.id },
       });
     }
     res.json({ ok: true, indexed: items.length });
@@ -402,22 +613,42 @@ app.post('/api/memory/search', async (req, res) => {
 
   try {
     const vector = await embeddings.embed(query);
-    const results = await qdrant.searchByVector(vector, { limit: limit || 5 });
+    const results = await qdrant.searchByVector(vector, {
+      limit: limit || 5,
+      filter: { must: [{ key: 'userId', match: { value: req.user.id } }] },
+    });
     res.json({ results });
   } catch (err) {
     res.status(503).json({ error: `Semantic memory search failed: ${err.message}` });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Ollama Chat running at http://localhost:${PORT}`);
-  console.log(`Proxying Ollama at ${OLLAMA_HOST}`);
+// Only bind a port and start background intervals when this file is run
+// directly (`node server.js` / `npm start`), not when it's required — e.g.
+// by tests, which need the `app` instance without a listening server.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Ollama Chat running at http://localhost:${PORT}`);
+    console.log(`Proxying Ollama at ${OLLAMA_HOST}`);
 
-  // Non-fatal startup check: warn once if Qdrant isn't reachable, but never
-  // block or crash the server on it.
-  qdrant.checkConnection().then((result) => {
-    if (!result.ok) {
-      console.warn(`Warning: Qdrant unreachable at ${qdrant.QDRANT_URL} (semantic memory endpoints will return 503 until it's available): ${result.error}`);
-    }
+    // Non-fatal startup check: warn once if Qdrant isn't reachable, but never
+    // block or crash the server on it.
+    qdrant.checkConnection().then((result) => {
+      if (!result.ok) {
+        console.warn(`Warning: Qdrant unreachable at ${qdrant.QDRANT_URL} (semantic memory endpoints will return 503 until it's available): ${result.error}`);
+      }
+    });
+
+    // Prune expired login sessions on startup, then every 6 hours — keeps
+    // the sessions table from growing unbounded with abandoned tokens (see
+    // auth.js pruneExpiredSessions for why lazy pruning alone isn't enough).
+    auth.pruneExpiredSessions();
+    setInterval(() => auth.pruneExpiredSessions(), 6 * 60 * 60 * 1000);
   });
-});
+}
+
+// Exposed for tests only (e.g. asserting the compaction timeout behavior
+// without spinning up a real Ollama instance); not used by any route above.
+app.summarizeWithOllama = summarizeWithOllama;
+
+module.exports = app;

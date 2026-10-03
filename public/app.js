@@ -2,18 +2,39 @@
   'use strict';
 
   // ---------- State ----------
-  const STORAGE_KEY = 'ollama-chat:chats';
+  // Chats live on the server now (/api/sessions/*, scoped to the logged-in
+  // account); localStorage is only used for settings/theme and as the
+  // one-time migration source for chats created before that switch.
+  const MIGRATION_SOURCE_KEY = 'ollama-chat:chats';
+  const MIGRATION_DONE_KEY = 'ollama-chat:chats:migrated';
   const SETTINGS_KEY = 'ollama-chat:settings';
+  const THEME_KEY = 'ollama-chat:theme';
 
-  let chats = loadChats();
-  let activeChatId = chats.length ? chats[0].id : null;
+  let chats = []; // session summaries from GET /api/sessions
+  let activeChatId = null;
+  let activeSession = null; // the open chat's full session (with messages)
   let settings = loadSettings();
   let models = [];
   let abortController = null;
   let sidebarCollapsed = false;
-  let systemInfo = null; // { totalMemory, freeMemory }
   let pullController = null;
   let pendingAttachments = []; // [{ name, content, size }] staged for the next message
+  let currentTheme = 'light';
+
+  // ---------- Icons ----------
+  // Small inline-SVG icon set (one stroke weight, one style) used anywhere
+  // this file builds DOM nodes directly, so dynamically-created UI never
+  // falls back to emoji glyphs. See style.css `svg.icon` for sizing.
+  const ICONS = {
+    brand:
+      '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>',
+    user:
+      '<svg class="icon" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    close:
+      '<svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    warning:
+      '<svg class="icon" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17.01"/></svg>',
+  };
 
   // ---------- Attachments ----------
   const ATTACHMENT_EXTENSIONS = [
@@ -33,10 +54,21 @@
     statusDot: document.getElementById('statusDot'),
     statusText: document.getElementById('statusText'),
     settingsBtn: document.getElementById('settingsBtn'),
+    usernameLabel: document.getElementById('usernameLabel'),
+    logoutBtn: document.getElementById('logoutBtn'),
+    themeToggleBtn: document.getElementById('themeToggleBtn'),
+    themeToggleIcon: document.getElementById('themeToggleIcon'),
+    themeToggleLabel: document.getElementById('themeToggleLabel'),
+    themeToggleBtnTopbar: document.getElementById('themeToggleBtnTopbar'),
+    themeToggleIconTopbar: document.getElementById('themeToggleIconTopbar'),
     modelSelect: document.getElementById('modelSelect'),
     refreshModelsBtn: document.getElementById('refreshModelsBtn'),
     chatTitle: document.getElementById('chatTitle'),
     clearChatBtn: document.getElementById('clearChatBtn'),
+    exportBtn: document.getElementById('exportBtn'),
+    exportMenu: document.getElementById('exportMenu'),
+    exportMarkdownBtn: document.getElementById('exportMarkdownBtn'),
+    exportJsonBtn: document.getElementById('exportJsonBtn'),
     messages: document.getElementById('messages'),
     emptyState: document.getElementById('emptyState'),
     emptyModelHint: document.getElementById('emptyModelHint'),
@@ -60,24 +92,52 @@
     pullProgress: document.getElementById('pullProgress'),
     pullProgressFill: document.getElementById('pullProgressFill'),
     pullProgressText: document.getElementById('pullProgressText'),
-    memoryWarning: document.getElementById('memoryWarning'),
     fileInput: document.getElementById('fileInput'),
     attachBtn: document.getElementById('attachBtn'),
     pendingAttachments: document.getElementById('pendingAttachments'),
+    contextMeter: document.getElementById('contextMeter'),
+    contextMeterFill: document.getElementById('contextMeterFill'),
+    contextMeterText: document.getElementById('contextMeterText'),
+    compactionNote: document.getElementById('compactionNote'),
+    migrationBanner: document.getElementById('migrationBanner'),
+    migrationText: document.getElementById('migrationText'),
+    migrationImportBtn: document.getElementById('migrationImportBtn'),
+    migrationDismissBtn: document.getElementById('migrationDismissBtn'),
   };
 
-  // ---------- Persistence ----------
-  function loadChats() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+  // ---------- Persistence (server sessions) ----------
+  async function apiRequest(url, options) {
+    const res = await fetch(url, options);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
   }
 
-  function saveChats() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+  async function refreshChatList() {
+    const data = await apiRequest('/api/sessions');
+    chats = data.sessions || [];
+  }
+
+  function fetchSession(id) {
+    return apiRequest(`/api/sessions/${encodeURIComponent(id)}`);
+  }
+
+  function patchSession(id, body) {
+    return apiRequest(`/api/sessions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  // Keeps the in-memory summary list ordered like the server's
+  // listSessions() (newest-updated first) after a successful write.
+  function bumpSummary(id, patch) {
+    const summary = chats.find((c) => c.id === id);
+    if (summary) {
+      Object.assign(summary, patch, { updatedAt: new Date().toISOString() });
+      chats.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    }
   }
 
   function loadSettings() {
@@ -97,57 +157,229 @@
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }
 
-  // ---------- Chat helpers ----------
-  function createChat() {
-    const chat = {
-      id: crypto.randomUUID(),
-      title: 'New chat',
-      model: el.modelSelect.value || settings.lastModel || '',
-      messages: [],
-      createdAt: Date.now(),
-    };
-    chats.unshift(chat);
-    activeChatId = chat.id;
-    saveChats();
-    renderChatList();
-    renderMessages();
-    updateTitle();
-  }
-
-  function getActiveChat() {
-    return chats.find((c) => c.id === activeChatId) || null;
-  }
-
-  function deleteChat(id, evt) {
-    if (evt) evt.stopPropagation();
-    chats = chats.filter((c) => c.id !== id);
-    saveChats();
-    if (activeChatId === id) {
-      activeChatId = chats.length ? chats[0].id : null;
+  // ---------- Theme ----------
+  function loadTheme() {
+    try {
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'light' || stored === 'dark') return stored;
+    } catch {
+      // localStorage unavailable (privacy mode etc.) — fall through to
+      // the matchMedia default below.
     }
-    renderChatList();
-    renderMessages();
-    updateTitle();
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
   }
 
-  function selectChat(id) {
-    activeChatId = id;
-    renderChatList();
-    renderMessages();
-    updateTitle();
-    const chat = getActiveChat();
-    if (chat && chat.model) el.modelSelect.value = chat.model;
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const sunIcon = '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
+    const moonIcon = '<svg class="icon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>';
+    const icon = theme === 'dark' ? sunIcon : moonIcon;
+    if (el.themeToggleIcon) el.themeToggleIcon.innerHTML = icon;
+    if (el.themeToggleIconTopbar) el.themeToggleIconTopbar.innerHTML = icon;
+    if (el.themeToggleLabel) el.themeToggleLabel.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+    if (el.themeToggleBtn) el.themeToggleBtn.setAttribute('aria-pressed', String(theme === 'dark'));
+    if (el.themeToggleBtnTopbar) {
+      el.themeToggleBtnTopbar.setAttribute('aria-pressed', String(theme === 'dark'));
+      el.themeToggleBtnTopbar.title = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+    }
   }
 
-  function updateTitleFromFirstMessage(chat, text) {
-    if (chat.title === 'New chat') {
-      chat.title = text.slice(0, 48) + (text.length > 48 ? '…' : '');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+    applyTheme(theme);
+  }
+
+  function toggleTheme() {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  }
+
+  // ---------- Migration from pre-session localStorage chats ----------
+  // Chats used to live in localStorage under MIGRATION_SOURCE_KEY. On the
+  // first load after the server-session switch, if the account has no
+  // server-side sessions but legacy chats exist in this browser, offer a
+  // one-time import. Dismissing without importing leaves the localStorage
+  // data untouched, so the prompt simply returns on the next load.
+
+  function loadLegacyLocalChats() {
+    try {
+      const raw = localStorage.getItem(MIGRATION_SOURCE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function hasMigratedLegacyChats() {
+    try {
+      return localStorage.getItem(MIGRATION_DONE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  async function maybeOfferMigration() {
+    if (hasMigratedLegacyChats() || chats.length) return;
+    const legacy = loadLegacyLocalChats();
+    if (!legacy.length) return;
+    el.migrationText.textContent =
+      `${legacy.length} chat${legacy.length === 1 ? '' : 's'} from this browser predate server storage. ` +
+      'Import them into your account? Nothing is deleted either way.';
+    el.migrationBanner.classList.remove('hidden');
+  }
+
+  async function importLegacyChats() {
+    const legacy = loadLegacyLocalChats();
+    el.migrationImportBtn.disabled = true;
+    el.migrationImportBtn.textContent = 'Importing…';
+    let imported = 0;
+    try {
+      for (const chat of legacy) {
+        const title = typeof chat.title === 'string' && chat.title.trim()
+          ? chat.title.trim().slice(0, 200)
+          : undefined;
+        const session = await apiRequest('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(title ? { title } : {}),
+        });
+        const messages = Array.isArray(chat.messages)
+          ? chat.messages.filter((m) => m && typeof m.role === 'string' && typeof m.content === 'string')
+          : [];
+        if (messages.length) {
+          await patchSession(session.id, { appendMessages: messages });
+        }
+        imported += 1;
+      }
+      try {
+        localStorage.setItem(MIGRATION_DONE_KEY, '1');
+      } catch {
+        // Flag couldn't be persisted (quota/private mode) — the banner may
+        // re-offer next load; imported chats on the server are the source
+        // of truth from here on, so that only wastes a prompt, not data.
+      }
+      el.migrationBanner.classList.add('hidden');
+      await refreshChatList();
+      if (chats.length) {
+        await selectChat(chats[0].id);
+      } else {
+        renderChatList();
+        renderMessages();
+        updateTitle();
+      }
+    } catch (err) {
+      el.migrationImportBtn.disabled = false;
+      el.migrationImportBtn.textContent = 'Import';
+      showError(`Import failed after ${imported} of ${legacy.length} chats: ${err.message}`);
+    }
+  }
+
+  el.migrationImportBtn.addEventListener('click', importLegacyChats);
+  el.migrationDismissBtn.addEventListener('click', () => {
+    // Deliberately does not set MIGRATION_DONE_KEY: skipping now re-offers
+    // on the next load, and the localStorage chats are left untouched.
+    el.migrationBanner.classList.add('hidden');
+  });
+
+  // ---------- Chat helpers ----------
+  async function createChat() {
+    try {
+      const session = await apiRequest('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      chats.unshift({
+        id: session.id,
+        title: session.title,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+      });
+      activeChatId = session.id;
+      activeSession = session;
+      renderChatList();
+      renderMessages();
+      updateTitle();
+      return session;
+    } catch (err) {
+      showError(err.message);
+      return null;
+    }
+  }
+
+  async function deleteChat(id, evt) {
+    if (evt) evt.stopPropagation();
+    try {
+      await apiRequest(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch (err) {
+      showError(err.message);
+      return;
+    }
+    chats = chats.filter((c) => c.id !== id);
+    if (activeChatId === id) {
+      if (chats.length) {
+        await selectChat(chats[0].id);
+      } else {
+        activeChatId = null;
+        activeSession = null;
+        renderChatList();
+        renderMessages();
+        updateTitle();
+      }
+    } else {
+      renderChatList();
+    }
+  }
+
+  async function selectChat(id) {
+    try {
+      const session = await fetchSession(id);
+      activeChatId = id;
+      activeSession = session;
+      renderChatList();
+      renderMessages();
+      updateTitle();
+      const preferred = preferredModelFor(session);
+      if (preferred && models.some((m) => m.name === preferred)) {
+        el.modelSelect.value = preferred;
+      }
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  // The model used for a chat isn't a server-side session field — it lives
+  // on the assistant messages that carried it. Derive from the most recent
+  // one, falling back to the last-used global model.
+  function preferredModelFor(session) {
+    if (session && Array.isArray(session.messages)) {
+      for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+        if (session.messages[i].model) return session.messages[i].model;
+      }
+    }
+    return settings.lastModel || '';
+  }
+
+  async function updateTitleFromFirstMessage(chat, text) {
+    if (chat.title !== 'New chat') return;
+    const title = text.slice(0, 48) + (text.length > 48 ? '…' : '');
+    try {
+      await patchSession(chat.id, { title });
+      chat.title = title;
+      bumpSummary(chat.id, { title });
+      renderChatList();
+      updateTitle();
+    } catch (err) {
+      showError(err.message);
     }
   }
 
   function updateTitle() {
-    const chat = getActiveChat();
-    el.chatTitle.textContent = chat ? chat.title : 'New chat';
+    el.chatTitle.textContent = activeSession ? activeSession.title : 'New chat';
   }
 
   // ---------- Rendering ----------
@@ -172,7 +404,7 @@
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'del';
-      del.textContent = '✕';
+      del.innerHTML = ICONS.close;
       del.title = 'Delete chat';
       del.setAttribute('aria-label', `Delete chat "${chat.title}"`);
       del.onclick = (e) => deleteChat(chat.id, e);
@@ -209,11 +441,15 @@
       .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
 
     const paragraphs = working.split(/\n{2,}/).map((p) => {
+      // NUL (\u0000) is used as a placeholder for code blocks after HTML
+      // escaping — it can never appear in the escaped text itself.
+      // eslint-disable-next-line no-control-regex
       if (/^\u0000CODE\d+\u0000$/.test(p.trim())) return p.trim();
       return `<p>${p.replace(/\n/g, '<br>')}</p>`;
     });
     working = paragraphs.join('\n');
 
+    // eslint-disable-next-line no-control-regex -- see note above.
     working = working.replace(/\u0000CODE(\d+)\u0000/g, (_, idx) => {
       const { lang, code } = blocks[Number(idx)];
       const escaped = escapeHtml(code).replace(/\n$/, '');
@@ -225,20 +461,22 @@
 
   function renderMessages() {
     el.messages.innerHTML = '';
-    const chat = getActiveChat();
+    const chat = activeSession;
 
     if (!chat || !chat.messages.length) {
       el.messages.appendChild(el.emptyState);
       el.emptyState.classList.remove('hidden');
       refreshEmptyHint();
+      updateContextMeter();
       return;
     }
 
     el.emptyState.classList.add('hidden');
 
-    for (const msg of chat.messages) {
-      el.messages.appendChild(buildMessageRow(msg));
-    }
+    chat.messages.forEach((msg, index) => {
+      el.messages.appendChild(buildMessageRow(msg, index));
+    });
+    updateContextMeter();
     scrollToBottom();
   }
 
@@ -250,13 +488,14 @@
     }
   }
 
-  function buildMessageRow(msg) {
+  function buildMessageRow(msg, index) {
     const row = document.createElement('div');
     row.className = 'msg-row ' + (msg.role === 'user' ? 'user' : 'assistant');
 
     const avatar = document.createElement('div');
     avatar.className = 'msg-avatar';
-    avatar.textContent = msg.role === 'user' ? '🧑' : '🦙';
+    avatar.innerHTML = msg.role === 'user' ? ICONS.user : ICONS.brand;
+    avatar.setAttribute('aria-hidden', 'true');
 
     const body = document.createElement('div');
     body.className = 'msg-body';
@@ -285,15 +524,38 @@
       body.appendChild(attachmentsRow);
     }
 
+    const actions = document.createElement('div');
+    actions.className = 'msg-actions';
+
     if (msg.role === 'assistant' && msg.content) {
-      const actions = document.createElement('div');
-      actions.className = 'msg-actions';
       const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
       copyBtn.textContent = 'Copy';
       copyBtn.onclick = () => navigator.clipboard.writeText(msg.content);
       actions.appendChild(copyBtn);
-      body.appendChild(actions);
     }
+
+    // Regenerate is offered on the last assistant turn only: the history is
+    // linear (no branching — see PLAN.md C1), so regenerating anything
+    // earlier would silently discard every turn after it.
+    const isLastMessage = activeSession && index === activeSession.messages.length - 1;
+    if (msg.role === 'assistant' && msg.content && isLastMessage) {
+      const regenBtn = document.createElement('button');
+      regenBtn.type = 'button';
+      regenBtn.textContent = 'Regenerate';
+      regenBtn.onclick = () => regenerateMessage(index);
+      actions.appendChild(regenBtn);
+    }
+
+    if (msg.role === 'user') {
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.textContent = 'Edit';
+      editBtn.onclick = () => startEditingMessage(index, row);
+      actions.appendChild(editBtn);
+    }
+
+    if (actions.childElementCount) body.appendChild(actions);
 
     row.appendChild(avatar);
     row.appendChild(body);
@@ -302,6 +564,109 @@
 
   function scrollToBottom() {
     el.messages.scrollTop = el.messages.scrollHeight;
+  }
+
+  // ---------- Regenerate / edit (linear history) ----------
+  // Both actions truncate the history at a point and re-stream from there,
+  // persisting the truncation as a full `messages` replace. There is no
+  // branching: everything after the edited/regenerated turn is discarded,
+  // which is what PLAN.md C1 scopes.
+
+  async function replaceMessages(chat, messages) {
+    try {
+      const updated = await patchSession(chat.id, { messages });
+      chat.messages = updated.messages;
+      bumpSummary(chat.id, {});
+      return true;
+    } catch (err) {
+      showError(`Couldn't update this chat: ${err.message}`);
+      return false;
+    }
+  }
+
+  async function regenerateMessage(index) {
+    if (abortController) return;
+    const chat = activeSession;
+    if (!chat) return;
+    // Reuse the model that produced the reply, so regenerating doesn't
+    // silently switch models when the picker has moved on since.
+    const model = chat.messages[index].model || el.modelSelect.value;
+    if (!model) {
+      showError('Select a model first. If none are listed, pull one with "ollama pull <model>".');
+      return;
+    }
+    if (!(await replaceMessages(chat, chat.messages.slice(0, index)))) return;
+    renderChatList();
+    renderMessages();
+    await streamAssistantReply(chat, model);
+  }
+
+  function startEditingMessage(index, row) {
+    if (abortController) return;
+    const chat = activeSession;
+    if (!chat) return;
+    const msg = chat.messages[index];
+    const contentEl = row.querySelector('.msg-content');
+    const actionsEl = row.querySelector('.msg-actions');
+    if (!contentEl || row.querySelector('.msg-edit')) return;
+
+    const editor = document.createElement('div');
+    editor.className = 'msg-edit';
+
+    const textarea = document.createElement('textarea');
+    textarea.rows = Math.min(12, (msg.content.match(/\n/g) || []).length + 2);
+    textarea.value = msg.content;
+    textarea.setAttribute('aria-label', 'Edit your message');
+
+    const editActions = document.createElement('div');
+    editActions.className = 'msg-edit-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'btn btn-primary';
+    saveBtn.textContent = 'Save & resend';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-ghost';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => renderMessages();
+
+    saveBtn.onclick = () => submitEditedMessage(index, textarea.value);
+
+    editActions.appendChild(saveBtn);
+    editActions.appendChild(cancelBtn);
+    editor.appendChild(textarea);
+    editor.appendChild(editActions);
+
+    contentEl.classList.add('hidden');
+    if (actionsEl) actionsEl.classList.add('hidden');
+    contentEl.after(editor);
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }
+
+  async function submitEditedMessage(index, text) {
+    const chat = activeSession;
+    if (!chat) return;
+    const trimmed = text.trim();
+    if (!trimmed) {
+      showError('An edited message cannot be empty.');
+      return;
+    }
+    const model = el.modelSelect.value || preferredModelFor(chat);
+    if (!model) {
+      showError('Select a model first. If none are listed, pull one with "ollama pull <model>".');
+      return;
+    }
+    // Attachments stay with the message they were sent on — an edit changes
+    // the text, not the files that were attached to it.
+    const edited = { ...chat.messages[index], content: trimmed };
+    const kept = [...chat.messages.slice(0, index), edited];
+    if (!(await replaceMessages(chat, kept))) return;
+    renderChatList();
+    renderMessages();
+    await streamAssistantReply(chat, model);
   }
 
   el.messages.addEventListener('click', (e) => {
@@ -338,7 +703,7 @@
           opt.textContent = m.name;
           el.modelSelect.appendChild(opt);
         }
-        const preferred = getActiveChat()?.model || settings.lastModel;
+        const preferred = preferredModelFor(activeSession) || settings.lastModel;
         if (preferred && models.some((m) => m.name === preferred)) {
           el.modelSelect.value = preferred;
         }
@@ -349,7 +714,6 @@
     }
     refreshEmptyHint();
     renderInstalledModels();
-    checkMemoryForSelectedModel();
   }
 
   function setStatus(ok, message) {
@@ -357,14 +721,19 @@
     el.statusText.textContent = ok ? 'Ollama connected' : (message || 'Ollama unreachable');
   }
 
-  // ---------- System memory ----------
-  async function loadSystemInfo() {
+  // ---------- Current user ----------
+  async function loadCurrentUser() {
     try {
-      const res = await fetch('/api/system');
-      if (!res.ok) return;
-      systemInfo = await res.json();
+      const res = await fetch('/api/auth/me');
+      const data = await res.json();
+      if (!data || !data.user) {
+        window.location.replace('/login.html');
+        return;
+      }
+      if (el.usernameLabel) el.usernameLabel.textContent = data.user.username;
     } catch {
-      systemInfo = null;
+      // If we can't reach the server at all, let the rest of init() surface
+      // that via the Ollama status indicator instead of bouncing to login.
     }
   }
 
@@ -378,31 +747,6 @@
       i++;
     }
     return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
-  }
-
-  // Warn (don't block) when the selected model's on-disk size is close to or
-  // larger than currently free RAM — the scenario from the server-side
-  // comment where a too-big model causes swap thrashing instead of a clean
-  // out-of-memory error.
-  function checkMemoryForSelectedModel() {
-    if (!systemInfo || !el.modelSelect.value) {
-      el.memoryWarning.classList.add('hidden');
-      return;
-    }
-    const model = models.find((m) => m.name === el.modelSelect.value);
-    if (!model || !model.size) {
-      el.memoryWarning.classList.add('hidden');
-      return;
-    }
-    const threshold = systemInfo.freeMemory * 0.85;
-    if (model.size > threshold) {
-      el.memoryWarning.textContent =
-        `⚠ "${model.name}" is ${formatBytes(model.size)}, but only ${formatBytes(systemInfo.freeMemory)} RAM is free. ` +
-        `It may run very slowly or cause heavy swapping.`;
-      el.memoryWarning.classList.remove('hidden');
-    } else {
-      el.memoryWarning.classList.add('hidden');
-    }
   }
 
   // ---------- Model management (settings) ----------
@@ -559,9 +903,18 @@
     if (removable) {
       const remove = document.createElement('span');
       remove.className = 'remove';
-      remove.textContent = '✕';
+      remove.innerHTML = ICONS.close;
       remove.title = 'Remove attachment';
+      remove.setAttribute('role', 'button');
+      remove.setAttribute('tabindex', '0');
+      remove.setAttribute('aria-label', `Remove attachment "${att.name}"`);
       remove.onclick = () => removePendingAttachment(att);
+      remove.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          removePendingAttachment(att);
+        }
+      };
       chip.appendChild(remove);
     }
 
@@ -637,24 +990,33 @@
       return;
     }
 
-    let chat = getActiveChat();
+    let chat = activeSession;
     if (!chat) {
-      createChat();
-      chat = getActiveChat();
+      chat = await createChat();
+      if (!chat) return;
     }
-    chat.model = model;
     settings.lastModel = model;
     saveSettings();
 
-    updateTitleFromFirstMessage(chat, text);
+    await updateTitleFromFirstMessage(chat, text);
     const userMsg = { role: 'user', content: text };
     if (pendingAttachments.length) {
       userMsg.attachments = pendingAttachments.map((a) => ({ name: a.name, content: a.content, size: a.size }));
     }
-    chat.messages.push(userMsg);
+
+    // Persist the user message before streaming. If the write fails, the
+    // message still goes out — chat stays usable, it just won't survive a
+    // reload until a later successful write.
+    try {
+      const updated = await patchSession(chat.id, { appendMessages: [userMsg] });
+      chat.messages = updated.messages;
+      bumpSummary(chat.id, {});
+    } catch (err) {
+      showError(`Couldn't save this message: ${err.message}`);
+      chat.messages.push(userMsg);
+    }
     pendingAttachments = [];
     renderPendingAttachments();
-    saveChats();
     renderChatList();
     renderMessages();
     updateTitle();
@@ -662,7 +1024,7 @@
     el.promptInput.value = '';
     autoResizeTextarea();
 
-    await streamAssistantReply(chat);
+    await streamAssistantReply(chat, model);
   });
 
   function buildOllamaMessages(chat) {
@@ -683,10 +1045,10 @@
     return msgs;
   }
 
-  async function streamAssistantReply(chat) {
+  async function streamAssistantReply(chat, model) {
     const ollamaMessages = buildOllamaMessages(chat);
 
-    const assistantMsg = { role: 'assistant', content: '', model: chat.model };
+    const assistantMsg = { role: 'assistant', content: '', model };
     chat.messages.push(assistantMsg);
     renderMessages();
     markLastRowStreaming(true);
@@ -700,7 +1062,7 @@
         headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
         body: JSON.stringify({
-          model: chat.model,
+          model,
           messages: ollamaMessages,
           options: {
             temperature: settings.temperature,
@@ -713,6 +1075,13 @@
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `Request failed (${res.status})`);
+      }
+
+      // Set by /api/chat when compactMessages() actually folded older
+      // turns into a summary for this request.
+      if (res.headers.get('X-Compacted') === 'true') {
+        compactedChats.add(chat.id);
+        updateContextMeter();
       }
 
       const reader = res.body.getReader();
@@ -737,7 +1106,7 @@
           if (json.error) throw new Error(json.error);
           if (json.message && typeof json.message.content === 'string') {
             assistantMsg.content += json.message.content;
-            updateLastMessageContent(assistantMsg.content);
+            queueLastMessageContent(assistantMsg.content);
           }
           if (json.done) {
             // stream finished
@@ -745,24 +1114,42 @@
         }
       }
 
-      saveChats();
-      renderChatList();
+      // The throttled renderer may still be holding the last chunk or two.
+      flushLastMessageContent();
+      await persistAssistantMessage(chat, assistantMsg);
     } catch (err) {
       if (err.name === 'AbortError') {
         assistantMsg.content += assistantMsg.content ? '\n\n_[stopped]_' : '_[stopped]_';
+        pendingRenderText = null;
         updateLastMessageContent(assistantMsg.content);
+        await persistAssistantMessage(chat, assistantMsg);
       } else {
         showError(err.message);
+        pendingRenderText = null;
         if (!assistantMsg.content) {
           chat.messages.pop();
           renderMessages();
+        } else {
+          flushLastMessageContent();
+          await persistAssistantMessage(chat, assistantMsg);
         }
       }
-      saveChats();
     } finally {
+      flushLastMessageContent();
       setSending(false);
       markLastRowStreaming(false);
       abortController = null;
+      renderChatList();
+    }
+  }
+
+  async function persistAssistantMessage(chat, assistantMsg) {
+    try {
+      const updated = await patchSession(chat.id, { appendMessages: [assistantMsg] });
+      chat.messages = updated.messages;
+      bumpSummary(chat.id, {});
+    } catch (err) {
+      showError(`Couldn't save the reply: ${err.message}`);
     }
   }
 
@@ -773,6 +1160,39 @@
     const contentEl = lastRow.querySelector('.msg-content');
     if (contentEl) contentEl.innerHTML = renderMarkdown(text);
     scrollToBottom();
+  }
+
+  // Ollama emits one ndjson chunk per token, and renderMarkdown() re-parses
+  // the whole accumulated reply each time it runs — so rendering on every
+  // chunk is O(n²) in reply length and visibly janks on long answers.
+  // Coalesce those writes onto a trailing timer instead: at most one DOM
+  // write per RENDER_INTERVAL_MS, always with the latest text, and always
+  // flushed before the stream's final state is persisted or re-rendered.
+  const RENDER_INTERVAL_MS = 60;
+  let pendingRenderText = null;
+  let renderTimer = null;
+  let lastRenderAt = 0;
+
+  function queueLastMessageContent(text) {
+    pendingRenderText = text;
+    if (renderTimer !== null) return;
+    const wait = Math.max(0, RENDER_INTERVAL_MS - (Date.now() - lastRenderAt));
+    renderTimer = setTimeout(() => {
+      renderTimer = null;
+      flushLastMessageContent();
+    }, wait);
+  }
+
+  function flushLastMessageContent() {
+    if (renderTimer !== null) {
+      clearTimeout(renderTimer);
+      renderTimer = null;
+    }
+    if (pendingRenderText === null) return;
+    const text = pendingRenderText;
+    pendingRenderText = null;
+    lastRenderAt = Date.now();
+    updateLastMessageContent(text);
   }
 
   function markLastRowStreaming(on) {
@@ -799,7 +1219,7 @@
     const icon = document.createElement('span');
     icon.className = 'error-icon';
     icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = '⚠';
+    icon.innerHTML = ICONS.warning;
     const text = document.createElement('span');
     text.textContent = message;
     banner.appendChild(icon);
@@ -808,23 +1228,175 @@
     scrollToBottom();
   }
 
-  // ---------- Sidebar / chats ----------
-  el.newChatBtn.addEventListener('click', createChat);
-  el.clearChatBtn.addEventListener('click', () => {
-    const chat = getActiveChat();
-    if (!chat) return;
-    chat.messages = [];
-    chat.title = 'New chat';
-    saveChats();
-    renderChatList();
-    renderMessages();
-    updateTitle();
+  // ---------- Context window meter ----------
+  // Mirrors compaction.js's CHARS_PER_TOKEN heuristic (chars/4 ≈ tokens)
+  // so the figure shown here is the same one the server's compaction
+  // trigger reasons about. There is no build step (see PLAN.md D5), so the
+  // constant is duplicated rather than imported — keep the two in sync.
+  const CHARS_PER_TOKEN = 4;
+
+  // Chats whose last /api/chat response came back with X-Compacted: true.
+  // Not persisted: compaction is a property of a request, not of the saved
+  // history, so the note is scoped to this browsing session.
+  const compactedChats = new Set();
+
+  function estimateChatTokens(chat) {
+    let chars = 0;
+    for (const msg of buildOllamaMessages(chat)) chars += msg.content.length;
+    return Math.ceil(chars / CHARS_PER_TOKEN);
+  }
+
+  function formatTokens(count) {
+    return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
+  }
+
+  function updateContextMeter() {
+    if (!el.contextMeter) return;
+    const chat = activeSession;
+    if (!chat || !chat.messages.length) {
+      el.contextMeter.classList.add('hidden');
+      return;
+    }
+    const tokens = estimateChatTokens(chat);
+    const limit = settings.numCtx || 4096;
+    const ratio = Math.min(1, tokens / limit);
+    el.contextMeter.classList.remove('hidden');
+    el.contextMeterFill.style.width = `${Math.round(ratio * 100)}%`;
+    el.contextMeter.classList.toggle('near-limit', ratio >= 0.8);
+    el.contextMeterText.textContent = `~${formatTokens(tokens)} / ${formatTokens(limit)} tokens`;
+    el.contextMeter.title =
+      `Rough estimate (about 4 characters per token) of this chat against the ${limit}-token context window.`;
+    el.compactionNote.classList.toggle('hidden', !compactedChats.has(chat.id));
+  }
+
+  // ---------- Export ----------
+  // Frontend-only, no dependency: build the text in memory and hand it to
+  // the browser as a Blob download. Markdown reuses the same
+  // "[Attached file: ...]" fenced-block shape buildOllamaMessages() sends
+  // to the model, so an exported chat reads the way the model saw it.
+
+  function chatToMarkdown(chat) {
+    const lines = [`# ${chat.title}`, ''];
+    for (const msg of chat.messages) {
+      lines.push(`## ${msg.role === 'user' ? 'You' : msg.model || 'Assistant'}`, '');
+      if (msg.content) lines.push(msg.content, '');
+      for (const att of msg.attachments || []) {
+        lines.push(`[Attached file: ${att.name}]`, '```', att.content, '```', '');
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function chatToJson(chat) {
+    return JSON.stringify(
+      {
+        id: chat.id,
+        title: chat.title,
+        createdAt: chat.createdAt,
+        updatedAt: chat.updatedAt,
+        messages: chat.messages,
+      },
+      null,
+      2
+    );
+  }
+
+  function exportFilename(chat, extension) {
+    const slug = (chat.title || 'chat')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'chat';
+    return `${slug}-${new Date().toISOString().slice(0, 10)}.${extension}`;
+  }
+
+  function downloadBlob(filename, mimeType, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: mimeType }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Revoking immediately can cancel the download in some browsers; a
+    // turn of the event loop is enough for the click to have been taken.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function setExportMenuOpen(open) {
+    if (!el.exportMenu) return;
+    el.exportMenu.classList.toggle('hidden', !open);
+    el.exportBtn.setAttribute('aria-expanded', String(open));
+  }
+
+  function exportActiveChat(format) {
+    setExportMenuOpen(false);
+    const chat = activeSession;
+    if (!chat || !chat.messages.length) {
+      showError('Nothing to export yet — this chat has no messages.');
+      return;
+    }
+    if (format === 'json') {
+      downloadBlob(exportFilename(chat, 'json'), 'application/json', chatToJson(chat));
+    } else {
+      downloadBlob(exportFilename(chat, 'md'), 'text/markdown', chatToMarkdown(chat));
+    }
+  }
+
+  el.exportBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setExportMenuOpen(el.exportMenu.classList.contains('hidden'));
+  });
+  el.exportMarkdownBtn?.addEventListener('click', () => exportActiveChat('markdown'));
+  el.exportJsonBtn?.addEventListener('click', () => exportActiveChat('json'));
+  document.addEventListener('click', (e) => {
+    if (!el.exportMenu || el.exportMenu.classList.contains('hidden')) return;
+    if (!e.target.closest('.export-menu')) setExportMenuOpen(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setExportMenuOpen(false);
   });
 
+  // ---------- Sidebar / chats ----------
+  el.newChatBtn.addEventListener('click', createChat);
+  el.clearChatBtn.addEventListener('click', async () => {
+    const chat = activeSession;
+    if (!chat) return;
+    try {
+      await patchSession(chat.id, { messages: [], title: 'New chat' });
+      chat.messages = [];
+      chat.title = 'New chat';
+      bumpSummary(chat.id, { title: 'New chat' });
+      renderChatList();
+      renderMessages();
+      updateTitle();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  // Below this width the sidebar CSS switches from a permanent column to a
+  // full-height overlay (see the 560px breakpoint in style.css) — the two
+  // must agree on what "narrow" means.
+  const MOBILE_OVERLAY_QUERY = '(max-width: 560px)';
+  const isMobileOverlay = () =>
+    window.matchMedia && window.matchMedia(MOBILE_OVERLAY_QUERY).matches;
+
+  function setSidebarCollapsed(collapsed) {
+    sidebarCollapsed = collapsed;
+    el.app.classList.toggle('sidebar-collapsed', collapsed);
+    el.sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+  }
+
   el.sidebarToggle.addEventListener('click', () => {
-    sidebarCollapsed = !sidebarCollapsed;
-    el.app.classList.toggle('sidebar-collapsed', sidebarCollapsed);
-    el.sidebarToggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
+    setSidebarCollapsed(!sidebarCollapsed);
+  });
+
+  // On an overlay-width screen the open sidebar covers the chat entirely,
+  // so tapping anywhere in the main content area behind it should dismiss
+  // it, same as tapping outside any other overlay.
+  document.querySelector('.main')?.addEventListener('click', () => {
+    if (!sidebarCollapsed && isMobileOverlay()) setSidebarCollapsed(true);
   });
 
   el.refreshModelsBtn.addEventListener('click', loadModels);
@@ -848,11 +1420,25 @@
     settings.topP = Number(el.topP.value);
     settings.numCtx = Number(el.numCtx.value) || 4096;
     saveSettings();
+    // numCtx is the meter's denominator, so it can change here.
+    updateContextMeter();
     el.settingsOverlay.classList.add('hidden');
     el.settingsBtn.focus();
   }
 
+  el.themeToggleBtn?.addEventListener('click', toggleTheme);
+  el.themeToggleBtnTopbar?.addEventListener('click', toggleTheme);
+
   el.settingsBtn.addEventListener('click', openSettings);
+  el.logoutBtn?.addEventListener('click', async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Best-effort: even if the logout request fails, the cookie is
+      // replaced by the redirect below on the login page.
+    }
+    window.location.replace('/login.html');
+  });
   el.closeSettingsBtn.addEventListener('click', closeSettings);
   el.settingsOverlay.addEventListener('click', (e) => {
     if (e.target === el.settingsOverlay) closeSettings();
@@ -864,22 +1450,50 @@
   });
   el.temperature.addEventListener('input', () => (el.tempValue.textContent = el.temperature.value));
   el.topP.addEventListener('input', () => (el.topPValue.textContent = el.topP.value));
-  el.deleteAllBtn.addEventListener('click', () => {
+  el.deleteAllBtn.addEventListener('click', async () => {
     if (!confirm('Delete all chats? This cannot be undone.')) return;
-    chats = [];
+    const ids = chats.map((c) => c.id);
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await apiRequest(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      } catch {
+        failed += 1;
+      }
+    }
+    if (failed) showError(`Deleted ${ids.length - failed} of ${ids.length} chats.`);
+    try {
+      await refreshChatList();
+    } catch (err) {
+      showError(err.message);
+    }
     activeChatId = null;
-    saveChats();
+    activeSession = null;
     renderChatList();
     renderMessages();
     updateTitle();
     closeSettings();
   });
 
-  el.modelSelect.addEventListener('change', checkMemoryForSelectedModel);
-
   // ---------- Init ----------
   async function init() {
-    await loadSystemInfo();
+    currentTheme = loadTheme();
+    applyTheme(currentTheme);
+    // Start collapsed on phone-width screens — there the sidebar is a full
+    // overlay (see MOBILE_OVERLAY_QUERY), and opening on top of the chat by
+    // default would hide the one thing the user came here for.
+    if (isMobileOverlay()) setSidebarCollapsed(true);
+    await loadCurrentUser();
+    try {
+      await refreshChatList();
+      if (chats.length) await selectChat(chats[0].id);
+    } catch (err) {
+      showError(`Couldn't load your chats: ${err.message}`);
+      renderChatList();
+      renderMessages();
+      updateTitle();
+    }
+    await maybeOfferMigration();
     await loadModels();
     renderChatList();
     renderMessages();

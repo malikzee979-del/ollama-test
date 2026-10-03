@@ -19,8 +19,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'sessions.json');
+// DATA_FILE is overridable via SESSIONS_DATA_FILE so tests can point at an
+// isolated temp file instead of the real local data/sessions.json (see
+// test/db.test.js) — unset, behavior is unchanged from before.
+const DATA_FILE = process.env.SESSIONS_DATA_FILE || path.join(__dirname, 'data', 'sessions.json');
+const DATA_DIR = path.dirname(DATA_FILE);
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -66,23 +69,35 @@ function toSummary(session) {
   };
 }
 
-// List session summaries (no messages), newest-updated first.
-function listSessions() {
+// Sessions are scoped per-user (see auth.js): every read/write below takes
+// a `userId` and only ever touches sessions owned by that user, so one
+// account can never see or modify another account's chat history through
+// these APIs. Sessions created before per-user scoping existed (no
+// `userId` field) are owned by no one and won't be returned here.
+
+// List session summaries (no messages) owned by `userId`, newest-updated
+// first.
+function listSessions(userId) {
   return Object.values(sessions)
+    .filter((s) => s.userId === userId)
     .map(toSummary)
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
-// Get a full session (including messages) by id, or undefined.
-function getSession(id) {
-  return sessions[id];
+// Get a full session (including messages) by id, scoped to `userId`.
+// Returns undefined if it doesn't exist or belongs to a different user.
+function getSession(id, userId) {
+  const session = sessions[id];
+  return session && session.userId === userId ? session : undefined;
 }
 
-// Create a new, empty session. `title` defaults to "New chat" if omitted.
-function createSession(title) {
+// Create a new, empty session owned by `userId`. `title` defaults to
+// "New chat" if omitted.
+function createSession(userId, title) {
   const now = new Date().toISOString();
   const session = {
     id: crypto.randomUUID(),
+    userId,
     title: typeof title === 'string' && title.trim() ? title.trim() : 'New chat',
     createdAt: now,
     updatedAt: now,
@@ -93,16 +108,17 @@ function createSession(title) {
   return session;
 }
 
-// Update a session's title and/or messages.
+// Update a session's title and/or messages. Scoped to `userId`.
 //   - `title`: replaces the title if provided.
 //   - `messages`: replaces the full messages array if provided (each
-//     message is normalized to { role, content, createdAt, attachments? }).
+//     message is normalized to { role, content, createdAt, model?, attachments? }).
 //   - `appendMessages`: appended after any `messages` replacement, same
 //     normalization.
-// Returns the updated session, or null if the id doesn't exist.
-function updateSession(id, { title, messages, appendMessages } = {}) {
+// Returns the updated session, or null if the id doesn't exist or belongs
+// to a different user.
+function updateSession(id, userId, { title, messages, appendMessages } = {}) {
   const session = sessions[id];
-  if (!session) return null;
+  if (!session || session.userId !== userId) return null;
 
   if (typeof title === 'string' && title.trim()) {
     session.title = title.trim();
@@ -124,13 +140,19 @@ function normalizeMessage(msg) {
     role: msg.role,
     content: msg.content,
     createdAt: msg.createdAt || new Date().toISOString(),
+    // The model that produced an assistant message is display metadata
+    // (the UI shows "llama3" as the message author); anything else unknown
+    // is dropped.
+    ...(typeof msg.model === 'string' && msg.model ? { model: msg.model } : {}),
     ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
   };
 }
 
-// Delete a session by id. Returns true if it existed and was deleted.
-function deleteSession(id) {
-  if (!sessions[id]) return false;
+// Delete a session by id, scoped to `userId`. Returns true if it existed
+// (and was owned by `userId`) and was deleted.
+function deleteSession(id, userId) {
+  const session = sessions[id];
+  if (!session || session.userId !== userId) return false;
   delete sessions[id];
   persist();
   return true;

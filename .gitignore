@@ -4,3 +4,21 @@ node_modules/
 *.log
 .DS_Store
 data/
+python_app/.venv/
+python_app/__pycache__/
+python_app/**/__pycache__/
+.nicegui/
+
+# Throwaway debug scripts & screenshot captures (~1.3 GB)
+scratchpad/
+
+# Stray media at repo root (not referenced by any code)
+/gameplay.webm
+/busy_cyberworld_0.mp3
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Agent state
+.pixis/
