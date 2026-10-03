@@ -153,14 +153,91 @@ function pruneExpiredSessions() {
   return result.changes;
 }
 
+// Resets a user's password. Used by the CLI entry point at the bottom of
+// this file (`node auth.js --reset-password <username>`) — the recommended
+// local-first alternative to an emailed-token flow. Throws an Error with a
+// user-facing message on invalid input or an unknown username. Revokes all
+// of the user's sessions: whoever asked for the reset may not be the only
+// one holding a live cookie.
+function resetPassword(username, newPassword) {
+  const validationError = validateCredentials(username, newPassword);
+  if (validationError) throw new Error(validationError);
+
+  const row = getUserByUsername(username);
+  if (!row) throw new Error(`No user named "${username}".`);
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), row.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.id);
+  return toPublicUser(row);
+}
+
 module.exports = {
   DB_FILE,
   SESSION_COOKIE,
   SESSION_TTL_MS,
   createUser,
   verifyUser,
+  resetPassword,
   createSession,
   getUserBySessionToken,
   deleteSession,
   pruneExpiredSessions,
 };
+
+// --- CLI: local password reset ------------------------------------------
+//
+//   node auth.js --reset-password <username>
+//
+// Run on the host, so it can only ever be invoked by someone with shell
+// access — no network, no SMTP. Prompts for the new password twice (input
+// muted), validates it with the same rules as signup, and revokes the
+// user's existing sessions. Only runs when this file is executed directly,
+// never when it's required by server.js or the tests.
+if (require.main === module) {
+  const readline = require('readline');
+
+  function promptHiddenTwice(firstPrompt, secondPrompt) {
+    return new Promise((resolve) => {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+      // Mute the echo: redraw whatever readline writes as asterisks so the
+      // password never appears on screen (or in terminal scrollback).
+      rl.stdoutMuted = true;
+      rl._writeToOutput = (stringToWrite) => rl.output.write(rl.stdoutMuted ? '*' : stringToWrite);
+      // Both prompts share one interface — a second interface on the same
+      // stdin after the first closes swallows buffered input.
+      rl.question(firstPrompt, (first) => {
+        rl.question(secondPrompt, (second) => {
+          rl.close();
+          resolve([first, second]);
+        });
+      });
+    });
+  }
+
+  (async () => {
+    const args = process.argv.slice(2);
+    const username = args[0] === '--reset-password' ? args[1] : args[0];
+    if (!username || args[0] !== '--reset-password') {
+      console.error('Usage: node auth.js --reset-password <username>');
+      process.exit(1);
+    }
+
+    const [newPassword, confirmed] = await promptHiddenTwice(
+      `New password for "${username}": `,
+      'Confirm new password: '
+    );
+    if (newPassword !== confirmed) {
+      console.error('Passwords do not match; nothing changed.');
+      process.exit(1);
+    }
+
+    try {
+      const user = resetPassword(username, newPassword);
+      console.log(`Password reset for "${user.username}"; all existing sessions were revoked.`);
+      process.exit(0);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
+  })();
+}

@@ -296,6 +296,12 @@ the app right after signing up.
 - Set `COOKIE_SECURE=1` to also mark the session cookie `Secure` if you put
   this behind HTTPS; left unset (the default), it works over plain HTTP,
   which is how this app runs locally by default.
+- Forgot a password? Reset it from the host with
+  `node auth.js --reset-password <username>` — it prompts for the new
+  password twice (input muted), validates it with the same rules as signup,
+  and revokes all of that user's existing sessions. This is deliberately a
+  local/CLI flow rather than an emailed-token one: the app is local-first
+  and has no SMTP dependency.
 - `/api/auth/login` and `/api/auth/signup` are rate-limited per IP (10
   requests / 5 minutes) to slow down brute-forcing or signup spam, as are
   `/api/pull` (5 / 15 minutes), `DELETE /api/models/:name` (10 / 5

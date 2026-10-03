@@ -122,3 +122,26 @@ test('pruneExpiredSessions removes only expired sessions, leaving valid ones int
   assert.equal(auth.getUserBySessionToken(expiredToken), null);
   assert.ok(auth.getUserBySessionToken(validToken), 'a still-valid session must survive pruning');
 });
+
+// --- resetPassword (CLI password reset) ------------------------------------
+
+test('resetPassword changes the password and revokes all existing sessions', () => {
+  const user = auth.createUser('resetme', 'oldpassword1');
+  const { token } = auth.createSession(user.id);
+  assert.ok(auth.verifyUser('resetme', 'oldpassword1'), 'sanity: old password verifies before reset');
+  assert.ok(auth.getUserBySessionToken(token), 'sanity: session is live before reset');
+
+  const result = auth.resetPassword('resetme', 'newpassword9');
+  assert.equal(result.username, 'resetme');
+  assert.equal('password_hash' in result, false, 'password hash must never be in the public record');
+
+  assert.ok(auth.verifyUser('resetme', 'newpassword9'), 'the new password must verify');
+  assert.equal(auth.verifyUser('resetme', 'oldpassword1'), null, 'the old password must stop verifying');
+  assert.equal(auth.getUserBySessionToken(token), null, 'a live session must be revoked by the reset');
+});
+
+test('resetPassword validates input and rejects unknown usernames', () => {
+  assert.throws(() => auth.resetPassword('nosuchuser', 'password123'), /No user named/);
+  assert.throws(() => auth.resetPassword('resetme', 'short'), /Password/);
+  assert.throws(() => auth.resetPassword('bad name!', 'password123'), /Username/);
+});
