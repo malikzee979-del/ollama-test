@@ -93,6 +93,18 @@ namespace LocalTheftAuto
             float dx = s.MissionX - p.X, dy = s.MissionY - p.Y;
             if (dx * dx + dy * dy < ReachR * ReachR)
             {
+                // T7: the pristine variant (StealMaxDamagePct > 0) only pays
+                // if the mark arrived with health above the cap. A failed
+                // cap means no reward and the offer clock resets longer —
+                // scraping the car costs the job's value, not its reward.
+                if (s.StealMaxDamagePct > 0 && s.StealTarget.Health < s.StealMaxDamagePct)
+                {
+                    s.MissionOn = false;
+                    s.StealTarget = null;
+                    s.NextMissionAt = t + 22.0;
+                    s.Say("Delivered — but the bodywork's wrecked. Pristine job pays nothing.");
+                    return;
+                }
                 s.StealTarget = null;
                 Complete(s, t, "Delivered as ordered. +" + s.MissionReward + ". No questions asked, locally.");
             }
@@ -102,6 +114,7 @@ namespace LocalTheftAuto
         {
             s.MissionOn = false;
             s.Score += s.MissionReward;
+            s.CompletedJobs++;          // T7 ladder: every kind bumps it
             s.NextMissionAt = t + 12.0;
             s.Say(msg);
         }
@@ -234,11 +247,43 @@ namespace LocalTheftAuto
                 s.MissionY = c.y;
                 float seconds = dist / 130f + 16f;
                 s.MissionEnds = t + seconds;
-                s.MissionReward = 350 + Mathf.RoundToInt(dist / 18f) * 10;
-                s.Say("Steal that marked car and deliver it. +" + s.MissionReward + ".");
+
+                // T7: one in three steal contracts is a "pristine" job —
+                // deliver the mark with at least 70% health left. Pays the
+                // tier bonus (below) on top of the distance rate, and the
+                // offer text says so. Classic steals leave the cap at 0.
+                bool pristine = Random.value < 0.333f;
+                s.StealMaxDamagePct = pristine ? 70 : 0;
+
+                // T7 reward tier: rewards scale with lifetime completions
+                // (PristineFactor — every completed job of any kind bumps
+                // the ladder, capped so late-game pay stays sane)
+                int tier = RewardTier(s.CompletedJobs);
+                int rate = 350 + Mathf.RoundToInt(dist / 18f) * 10;
+                s.MissionReward = Mathf.RoundToInt(rate * (1f + tier * RewardTierStep));
+                if (pristine) s.MissionReward += 150;
+                s.Say(pristine
+                    ? "Pristine steal: deliver it with the bodywork intact (70%+). +"
+                      + s.MissionReward + ". Don't scrape it."
+                    : "Steal that marked car and deliver it. +" + s.MissionReward + ".");
                 return true;
             }
             return false;
+        }
+
+        /* ------------------------------------------------ T7: reward tiers */
+
+        // lifetime completed jobs, persisted with the save (SaveData field,
+        // kept out of the per-run counters deliberately)
+        public const float RewardTierStep = 0.25f;   // +25% reward per tier
+        public const int RewardTierMax = 5;
+
+        public static int RewardTier(int completedJobs)
+        {
+            // tier 0 at <5 jobs, tier 5 at 120+: the ladder is early-game
+            // acceleration, not an infinite escalator
+            int tier = completedJobs / 25;
+            return Mathf.Min(RewardTierMax, tier);
         }
     }
 }

@@ -60,6 +60,8 @@ namespace LocalTheftAuto
         readonly Dictionary<WeaponEnt, GameObject> weaponVis = new Dictionary<WeaponEnt, GameObject>();
 
         GameObject missionGo;
+        GameObject missionBoard;          // T15: street sign beside the marker
+        SpriteRenderer missionBoardGlow;
         SpriteRenderer[] missionBeams;
         SpriteRenderer missionGlow;
         static readonly Color MissionBlue = Cfg.Hex("#4fb4ff");
@@ -169,7 +171,8 @@ namespace LocalTheftAuto
             data.Player.X = data.State.Spawn.x;
             data.Player.Y = data.State.Spawn.y;
             Systems.SpawnWorld(data);
-            LoadGame(data);
+            Systems.SpawnGarageCar(data);   // T16: the owned ride waits near start
+            LoadGame(data);                 // after load, so the save's garage snapshot rules the spawn
 
             var camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
@@ -185,7 +188,7 @@ namespace LocalTheftAuto
             // wired up in UpdateWorldFX's first call.
             cam.clearFlags = CameraClearFlags.Skybox;
             cam.backgroundColor = DaySky;
-            SkyKit.Apply(DaySky, DaySky, Vector3.up, Color.white);
+            SkyKit.Apply(DaySky, DaySky, Vector3.up, Color.white, 1f, 1f, Color.clear);
             cam.fieldOfView = 60f;
             cam.nearClipPlane = 5f;
             cam.farClipPlane = 3200f;
@@ -275,6 +278,12 @@ namespace LocalTheftAuto
             missionBeams[1] = missionGo.transform.Find("beam1").GetComponent<SpriteRenderer>();
             missionGlow = missionGo.transform.Find("glow").GetComponent<SpriteRenderer>();
             missionGo.SetActive(false);
+
+            // T15: signboard beside the marker — built once here, shown/hidden
+            // and repositioned with the marker in SyncMission
+            missionBoard = MeshKit.BuildMissionBoard(MissionBlue);
+            missionBoardGlow = missionBoard.transform.Find("cap-glow").GetComponent<SpriteRenderer>();
+            missionBoard.SetActive(false);
 
             camPos = MeshKit.V3(data.Player.X, data.Player.Y, 0f) + new Vector3(-100f, 70f, 0f);
 
@@ -509,23 +518,29 @@ namespace LocalTheftAuto
             // display actually reports instead of assuming this machine.
             float maxNits = hdr.maxToneMapLuminance > 0 ? hdr.maxToneMapLuminance : 1000f;
 
-            // Sanity-check what the display told us. On this machine macOS
-            // reports paperWhite=160 but max=100 — a peak dimmer than paper
-            // white, which is self-contradictory and means the EDR headroom
-            // did not come through the Metal swapchain query. Grading to a
-            // 100-nit ceiling on an XDR panel would hand back the very
-            // highlight range HDR was turned on to get, so when the numbers
-            // disagree we stop trusting them and drive the limits explicitly.
-            // 1000 nits is the XDR panel's sustained full-frame figure (it
-            // peaks at 1600 in small windows) — deliberately conservative.
-            if (maxNits <= hdr.paperWhiteNits && toneMap != null)
+            // Sanity-check what the display told us. macOS can report
+            // paperWhite=160 but max=100 — a peak dimmer than paper white,
+            // which is self-contradictory and means the EDR headroom did not
+            // come through the Metal swapchain query. The old response was
+            // to trust "it's really an XDR panel" and grade to a hardcoded
+            // 1000 nits — but when the swapchain genuinely has only 100
+            // nits of headroom (different monitor, auto-brightness, a
+            // driver-side EDR drop), grading to 1000 on a 100-nit output
+            // crushes the whole frame to near-black. Trust the numbers:
+            // fall back to SDR ACES with detected limits, which always
+            // produces a readable frame, and log the choice.
+            if (maxNits <= hdr.paperWhiteNits)
             {
                 Debug.LogWarning($"[LTA] Display reported max={maxNits} <= paperWhite=" +
-                                 $"{hdr.paperWhiteNits}; overriding brightness limits.");
-                toneMap.detectBrightnessLimits.value = false;
-                toneMap.minNits.value = 0.005f;
-                toneMap.maxNits.value = 1000f;
-                maxNits = 1000f;
+                                 $"{hdr.paperWhiteNits}; no real HDR headroom — " +
+                                 "falling back to SDR grading.");
+                hdr.RequestHDRModeChange(false);
+                if (toneMap != null)
+                {
+                    toneMap.detectBrightnessLimits.value = true;
+                    toneMap.detectPaperWhite.value = true;
+                }
+                yield break;
             }
 
             if (toneMap != null)
@@ -638,15 +653,34 @@ namespace LocalTheftAuto
                 tint *= 0.9f;
             }
 
+            // T10: fog weather — very tight fog distance (sightlines short
+            // enough that you cannot read a block ahead), a milky ground-
+            // matched fog color, and grip barely affected (fog is a visibility
+            // cost, not a wet-road cost). Fog end distance (900) sits well
+            // INSIDE the texture build radius (~3600), so no unloaded block
+            // can pop in through the murk — that per-lane interaction with
+            // CityRenderer's eviction was the one hazard in this design
+            // (progression plan Phase 4.2's warning).
+            bool foggy = s.Weather == Weather.Fog;
+            if (foggy)
+            {
+                sky = Color.Lerp(sky, Cfg.Hex("#c9c3b4"), 0.7f);
+                fog = Cfg.Hex("#c9c3b4");
+                tint *= 0.96f;
+            }
+
             cam.backgroundColor = sky;
             RenderSettings.fogColor = fog;
-            RenderSettings.fogEndDistance = raining ? 1500f : 2600f;
+            RenderSettings.fogEndDistance = raining ? 1500f : foggy ? 900f : 2600f;
             Shader.SetGlobalColor(LtaDayNightId, tint);
             // Realism pass (Phase 8): grip loosens a bit further in a heavier
             // storm instead of one flat number for all rain — a light
             // drizzle (low rainIntensity) barely nicks handling, a downpour
             // nicks it more, matching the now-variable rain visuals.
-            s.WeatherGrip = raining ? Mathf.Lerp(0.74f, 0.62f, rainIntensity) : 1f;
+            // T10: fog costs a flat 0.9 grip — noticeable but minor.
+            s.WeatherGrip = raining
+                ? Mathf.Lerp(0.74f, 0.62f, rainIntensity)
+                : foggy ? 0.9f : 1f;
 
             // Phase 13: airborne light shafts are barely visible on a clear
             // night and obvious in a downpour, because what a beam actually
@@ -718,7 +752,15 @@ namespace LocalTheftAuto
             // negation.
             Vector3 sunDirWS = sun != null ? -sun.transform.forward : Vector3.up;
             Color sunDiscColor = sun != null ? sun.color : Color.white;
-            SkyKit.Apply(sky, fog, sunDirWS, sunDiscColor);
+            // T17: sunset/dawn band + starfield. Band color picks warm sunset
+            // vs cool dawn from the sun's azimuth relative to the camera
+            // heading (west = warm orange leaving, east = pale pink coming);
+            // elevation from the sun's own declination drives the fade.
+            float sunElevN = Mathf.Clamp01((sun != null
+                ? Vector3.Dot(sunDirWS, Vector3.up) : 1f) / 0.9f);
+            bool duskSide = Mathf.Cos((float)((frac * 360.0 - 90.0) * Mathf.Deg2Rad)) < 0f;
+            Color bandC = duskSide ? Cfg.Hex("#ff9a4d") : Cfg.Hex("#ffb3c2");
+            SkyKit.Apply(sky, fog, sunDirWS, sunDiscColor, dayAmount, sunElevN, bandC);
 
             StepReflectionProbe(dt);
         }
@@ -781,6 +823,16 @@ namespace LocalTheftAuto
             if (d.Player.Weapon == WeaponKind.Shotgun && !d.Player.OwnsShotgun) d.Player.Weapon = WeaponKind.None;
             if (d.Player.Weapon == WeaponKind.Pistol && !d.Player.OwnsPistol) d.Player.Weapon = WeaponKind.None;
             d.State.Score = Mathf.Max(0, sd.score);
+            d.State.CompletedJobs = Mathf.Max(0, sd.completedJobs);   // T7 ladder resumes
+            // T16: the garage's owned ride round-trips (fresh snapshot from
+            // the last garage save; no owned car without one)
+            Systems.GarageStored = sd.hasGarageCar;
+            if (sd.hasGarageCar)
+            {
+                Systems.gBody = Mathf.Clamp(sd.gBody, 0, 3);
+                Systems.gR = sd.gR; Systems.gG = sd.gG; Systems.gB = sd.gB;
+                Systems.gHealth = Mathf.Clamp(sd.gHealth, 20f, 100f);
+            }
             d.State.Wanted = 0;   // never resume with cops already on you
             if (sd.highScore > d.State.HighScore) d.State.HighScore = sd.highScore;
         }
@@ -795,7 +847,14 @@ namespace LocalTheftAuto
                 health = p.Health, ammo = p.Ammo, hasGun = p.HasGun,
                 weapon = (int)p.Weapon, ownsSmg = p.OwnsSmg, ownsShotgun = p.OwnsShotgun,
                 score = data.State.Score, wanted = data.State.Wanted,
-                highScore = data.State.HighScore, valid = true
+                highScore = data.State.HighScore,
+                completedJobs = data.State.CompletedJobs,   // T7 reward ladder persists
+                // T16: the garage's owned ride persists with the run
+                hasGarageCar = Systems.GarageStored,
+                gBody = Systems.gBody,
+                gR = Systems.gR, gG = Systems.gG, gB = Systems.gB,
+                gHealth = Systems.gHealth,
+                valid = true
             };
             PlayerPrefs.SetString(SaveKey, JsonUtility.ToJson(sd));
             PlayerPrefs.Save();
@@ -951,6 +1010,8 @@ namespace LocalTheftAuto
                     if (PlayerSys.EnterExitPressed()) PlayerSys.TryEnterExit(data);
                     PlayerSys.Step(data, simDt, -camYaw * Mathf.Deg2Rad);
                     Systems.SpikeStep(data, simDt);
+                    Systems.GasStationStep(data, simDt);   // T8: drive-in repair sink
+                    Systems.GarageStep(data, simDt);       // T16: garage world trigger
                     for (int i = 0; i < data.Cars.Count; i++) Systems.TrafficStep(data, data.Cars[i], simDt);
                     Systems.ExhaustStep(data, simDt, data.Player.X - 1000f, data.Player.Y - 800f, 2000f, 1600f);
                     Systems.SplashStep(data, simDt, data.Player.X - 1000f, data.Player.Y - 800f, 2000f, 1600f);
@@ -994,7 +1055,7 @@ namespace LocalTheftAuto
             city.Sync(data, data.Player.X, data.Player.Y, data.State.Weather == Weather.Rain, (float)data.State.Time, dt);
             SyncCars(dt);
             SyncCops(dt);
-            SyncPeds();
+            SyncPeds(dt);
             SyncPlayer((float)t);
             SyncPackages((float)t);
             SyncWeapons((float)t);
@@ -1037,46 +1098,8 @@ namespace LocalTheftAuto
             PlayerPrefs.DeleteKey(SaveKey);
             StopAllCoroutines();          // the old AutoSaveLoop; InitGame starts a fresh one
             GameAudio.Reset();
-            ResetAudio3DStatics();
+            Audio3D.Reset();              // T12: proper reset inside Audio3D itself
             RecoverFromDomainReload();
-        }
-
-        // LTA.Audio3D.cs is out of Stage 1's editable scope, so its static
-        // caches are reset from here by name instead of by a proper
-        // Audio3D.Reset(). Reflection is null-guarded: if a field is ever
-        // renamed the restart still works (minus that one cleanup) instead
-        // of throwing on a menu button. Replace with Audio3D.Reset() when
-        // that file opens up.
-        static void ResetAudio3DStatics()
-        {
-            const System.Reflection.BindingFlags bf =
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
-            var t = typeof(Audio3D);
-
-            // DestroyImmediate (not Destroy): the sweep's deferred Destroy
-            // leaves Audio3D's static `ambient` reference looking alive
-            // while InitGame runs, and Init() early-returns on it. An
-            // immediate destroy makes the reference fake-null right away so
-            // Init rebuilds. The ambient source lives on a root named
-            // "ambient" (Audio3D.Init).
-            var amb = GameObject.Find("ambient");
-            if (amb != null) DestroyImmediate(amb);
-
-            // entity-keyed source tables: their keys (CarVisual/CopEnt) and
-            // the sources' parent visuals are all about to be destroyed;
-            // fresh tables build on demand after the restart
-            foreach (var name in new[] { "carEngine", "copEngine", "copSiren" })
-            {
-                var f = t.GetField(name, bf);
-                var dict = f != null ? f.GetValue(null) as System.Collections.IDictionary : null;
-                if (dict != null) dict.Clear();
-            }
-
-            // distant-gunfire gate, compared against State.Time — the old
-            // session's clock value would silence firefights for minutes
-            // after a restart if left as-is
-            var gate = t.GetField("nextSparkGun", bf);
-            if (gate != null) gate.SetValue(null, 0f);
         }
 
         /* ------------------------------------------------ chase camera */
@@ -1326,7 +1349,7 @@ namespace LocalTheftAuto
             v.ArmB.localRotation = Quaternion.Euler(swingDeg * 0.7f, 0f, 0f);
         }
 
-        void SyncPeds()
+        void SyncPeds(float dt)
         {
             for (int i = 0; i < data.Peds.Count; i++)
             {
@@ -1357,7 +1380,17 @@ namespace LocalTheftAuto
                 }
                 else
                 {
-                    v.Root.transform.localScale = Vector3.one;
+                    // T13: per-ped height + panic cower. Scale carries the
+                    // build hash's HeightScale normally; while panicked the
+                    // visual squashes toward a crouch and the limbs fold up
+                    // (arms to head, slight forward hunch) before easing
+                    // back — CowerT interpolates in and out, so it reads as
+                    // ducking rather than snapping between poses.
+                    float cowerTarget = p.Panic > 0f ? 1f : 0f;
+                    v.CowerT = Mathf.MoveTowards(v.CowerT, cowerTarget, Mathf.Min(1f, 5f * dt));
+                    float cower = v.CowerT;
+                    v.Root.transform.localScale = new Vector3(
+                        1f, v.HeightScale * Mathf.Lerp(1f, 0.55f, cower), 1f);
                     MeshKit.Tint(v.Body, Color.white);
                     MeshKit.Tint(v.Head, Color.white);
                     // Realism pass (Phase 6): the alive branch never actually
@@ -1374,11 +1407,14 @@ namespace LocalTheftAuto
                     // and looked like a 7.6 Hz scramble on full-body
                     // characters.)
                     float cyclePhase = p.Phase * 1.05f;
-                    float bob = Mathf.Abs(Mathf.Sin(cyclePhase)) * Cfg.PedBobAmp;
+                    float bob = Mathf.Abs(Mathf.Sin(cyclePhase)) * Cfg.PedBobAmp * (1f - cower * 0.85f);
                     v.Root.transform.position = MeshKit.V3(p.X, p.Y, bob);
                     float sway = Mathf.Sin(cyclePhase) * Cfg.PedSwayDeg * (p.Panic > 0 ? 1.4f : 1f);
-                    v.Root.transform.rotation = MeshKit.YawJs(p.Dir * Mathf.PI / 2f) * Quaternion.Euler(0f, 0f, sway);
-                    AnimatePed(v, Mathf.Sin(cyclePhase) * 22f);
+                    v.Root.transform.rotation = MeshKit.YawJs(p.Dir * Mathf.PI / 2f)
+                        * Quaternion.Euler(cower * 16f, 0f, sway);
+                    // swing interpolates the walk cycle into the "arms over
+                    // the head" cower hold as CowerT rises
+                    AnimatePed(v, Mathf.Lerp(Mathf.Sin(cyclePhase) * 22f, 125f, cower));
                 }
             }
         }
@@ -1446,11 +1482,24 @@ namespace LocalTheftAuto
             if (showMarker)
             {
                 missionGo.transform.position = MeshKit.V3(s.MissionX, s.MissionY, 0f);
-                missionGo.transform.rotation = Quaternion.Euler(0f, t * 30f, 0f);
+                // T15: board stands a fixed offset off the marker so it never
+                // hides the beam; yaws to face the camera like a rooftop sign
+                float boardAng = Mathf.Atan2(data.Player.Y - s.MissionY, data.Player.X - s.MissionX);
+                float boardDist = Cfg.Tile * 0.9f;
+                missionBoard.SetActive(true);
+                missionBoard.transform.position = MeshKit.V3(
+                    s.MissionX + Mathf.Cos(boardAng) * boardDist,
+                    s.MissionY + Mathf.Sin(boardAng) * boardDist, 0f);
+                missionBoard.transform.rotation = Quaternion.Euler(0f, t * 30f, 0f);
                 float pulse = 0.55f + 0.45f * Mathf.Sin(t * 4f);
+                missionBoardGlow.color = new Color(MissionBlue.r, MissionBlue.g, MissionBlue.b, 0.32f * pulse);
                 missionBeams[0].color = new Color(MissionBlue.r, MissionBlue.g, MissionBlue.b, 0.18f + 0.16f * pulse);
                 missionBeams[1].color = missionBeams[0].color;
                 missionGlow.color = new Color(MissionBlue.r, MissionBlue.g, MissionBlue.b, 0.5f * pulse);
+            }
+            else
+            {
+                missionBoard.SetActive(false);   // T15: hide with the marker
             }
         }
 

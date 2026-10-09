@@ -1,5 +1,11 @@
 # Local Theft Auto — Graphics Plan: Apple Silicon / Metal
 
+> **CLOSED (2026-10-03) — decision made, nothing to build.** The plan's own
+> conclusion (bottom of this file) is *do not build the native MTLFX
+> temporal-scaler plugin*; STP + Forward+ (already configured in
+> `Assets/Settings/LTA-URP.asset`) covers the use case. Kept as a
+> decision record only.
+
 **Target:** `unity/LocalTheftAuto`, Unity `6000.5.9f1`, URP 17.5, Forward+, all-procedural.
 **Machine this plan is calibrated for:** MacBook Pro, **Apple M4**, 16 GB unified memory,
 **built-in Liquid Retina XDR** display, macOS 26.6.2. Unity `6000.5.9f1` is installed at

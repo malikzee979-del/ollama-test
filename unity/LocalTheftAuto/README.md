@@ -13,8 +13,9 @@ double math exactly), but the two engines have **deliberately diverged** in
 places — world size (144 vs 96 tiles), weapon tone (lethal vs non-lethal),
 mission sets, wanted escalation. The canonical divergence table lives in
 [PARITY.md](PARITY.md); update it whenever either side changes a shared
-constant or hashing rule. Only the presentation is 3D. No binary assets:
-every texture and mesh is generated at runtime, audio included.
+constant or hashing rule. Only the presentation is 3D. All textures and
+meshes are generated at runtime; audio uses the small real clips under
+`Assets/Resources/Audio/` (attribution in [`Assets/Audio/CREDITS.md`](Assets/Audio/CREDITS.md)).
 
 ## Opening the project
 

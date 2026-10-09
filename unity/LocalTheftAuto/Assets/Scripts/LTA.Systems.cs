@@ -252,7 +252,11 @@ namespace LocalTheftAuto
             // Realism pass (Phase 3): per-body-type cruise multiplier so a
             // van-shaped car cruises slower than a sedan in traffic too,
             // matching its (slower) player accel feel.
-            float target = c.Brake ? 0f : c.Cruise * Cfg.BodyCruiseMult[c.BodyType];
+            // T10: everyone drives slower in fog — lower sightlines mean
+            // earlier braking matters more than speed; a flat 0.75 cruise
+            // factor keeps the effect uniform across body types.
+            float cruiseWeather = d.State.Weather == Weather.Fog ? 0.75f : 1f;
+            float target = c.Brake ? 0f : c.Cruise * Cfg.BodyCruiseMult[c.BodyType] * cruiseWeather;
             // Realism pass (Phase 14): traffic now speeds up and slows down
             // with the SAME per-body accel/brake figures the player's car
             // uses (LTA.Player.cs), instead of a generic 4x/1.2x exponential
@@ -670,8 +674,11 @@ namespace LocalTheftAuto
 
                 // wanted-level escalation: backup drives faster the more
                 // stars are showing, same read as the JS original but with a
-                // visible top end instead of a flat pursuit speed
+                // visible top end instead of a flat pursuit speed.
+                // T9: SWAT units top out faster and brake later — an
+                // ordinary outrun doesn't work on them the same way.
                 float sp = 155f + d.State.Wanted * 10f;
+                if (c.Swat) sp += 30f;
                 // Realism pass (Phase 14): cops used to snap straight to the
                 // pursuit speed every frame — zero inertia, unlike every
                 // other car in the sim. They're always Sedan (Cfg.BodySedan),
@@ -813,7 +820,20 @@ namespace LocalTheftAuto
                         if (CityMap.TypeAtPx(x, y) == Cfg.Road)
                         {
                             int dir = Random.Range(0, 4);
-                            d.Cops.Add(new CopEnt { X = x, Y = y, Dir = dir, A = dir * Mathf.PI / 2f });
+                            // T9: at 5★ every second spawn is a SWAT unit —
+                            // roughly double the health, faster top speed,
+                            // hot return fire (all read in CopStep below via
+                            // the Swat flag, no separate list). At <5★ the
+                            // flag never sets and spawns are ordinary cops.
+                            bool swat = s.Wanted >= 5 && (d.Cops.Count % 2 == 1);
+                            d.Cops.Add(new CopEnt
+                            {
+                                X = x, Y = y, Dir = dir, A = dir * Mathf.PI / 2f,
+                                Swat = swat,
+                                Health = swat ? SwatHealth : 100f
+                            });
+                            if (swat && s.Wanted >= 5 && d.Cops.Count <= 2)
+                                s.Say("ARMORED UNITS responding. Those are not regular cruisers.");
                             break;
                         }
                     }
@@ -882,6 +902,95 @@ namespace LocalTheftAuto
                 s.Wasted -= dt;
                 if (s.Wasted <= 0f) s.Wasted = 0f;
             }
+
+            // T5 witness reporting — the countdown between a crime and the
+            // stars landing. Runs OUTSIDE the pursuit gate (like Busted/
+            // Wasted) so a report in flight still lands or cancels while
+            // the arrest-or-WASTED beat plays out. Cancel conditions:
+            //   · the reporter died (killed inside the window — the whole
+            //     point of the mechanic),
+            //   · the reporter panicked (saw a second crime — they're
+            //     running now, but their report already went out ONLY if
+            //     ReportPending; panic alone here just means "re-pick"),
+            //   · wanted decayed to zero somehow (paranoia guard).
+            // Re-arm semantics: RaiseCrime re-points Reporter/ReportAt, so
+            // a ped who panicked mid-report is replaced by RaiseCrime's new
+            // witness pick, never dropped silently.
+            if (s.ReportPending)
+            {
+                if (s.Reporter == null || s.Reporter.Dead || s.Reporter.Panic > 0f)
+                {
+                    s.ReportPending = false;
+                    s.Reporter = null;
+                    s.Say("The witness won't be talking to anyone. Locally.");
+                }
+                else if (t >= s.ReportAt)
+                {
+                    s.Wanted = Mathf.Min(5, s.Wanted + 1);
+                    s.ReportPending = false;
+                    s.Reporter = null;
+                    s.Say("Reported. The local police are coming.");
+                }
+            }
+        }
+
+        /* ------------------------------------------------- crime reporting */
+
+        // T5: does anyone see a crime at (x, y)? Picks the nearest living,
+        // non-panicked ped inside WitnessRadius as the reporter and re-arms
+        // the report delay. Returns true when a report is now in flight —
+        // the caller then does NOT raise stars directly. The old behaviour
+        // (instant omniscient stars) is what happens when this returns
+        // false — callers say so in their ticker line instead.
+        public const float WitnessRadius = 130f;    // same radius TryEnterExit already used
+        public const double WitnessDelay = 2.5;     // seconds before the stars land
+
+        // T9: SWAT health — roughly double a stock cruiser's, so bringing a
+        // 5★ unit down takes sustained fire (or a very good ram)
+        public const float SwatHealth = 220f;
+
+        public static bool RaiseCrimeWitnessed(GameData d, double t)
+        {
+            var s = d.State;
+            s.LastCrime = t;                          // decay clock runs off the crime, witnessed or not
+
+            PedEnt reporter = PedWitness(d, d.Player.X, d.Player.Y, WitnessRadius);
+            if (reporter == null) return false;       // nobody saw it
+
+            // first witness panics immediately (they saw it), second crime
+            // inside the window re-points the report at a fresh witness and
+            // re-arms the delay — the report never silently drops
+            reporter.Panic = 6f;
+            if (!s.ReportPending || s.Reporter == null || s.Reporter.Dead)
+            {
+                PedEnt pick = PedWitness(d, d.Player.X, d.Player.Y, WitnessRadius * 1.6f);
+                if (pick == null) return false;       // panicked the only witness — nobody left to tell
+                s.Reporter = pick;
+                s.ReportAt = t + WitnessDelay;
+                s.ReportPending = true;
+            }
+            else
+            {
+                s.ReportAt = t + WitnessDelay;        // re-arm: piling on crimes extends the window
+            }
+            return true;
+        }
+
+        // nearest living, non-panicked ped within radius of (x, y).
+        // Full scan today; Spatial.Peds.QueryFresh is the drop-in if the
+        // ped list ever makes the linear cost visible (it's ~120 peds).
+        public static PedEnt PedWitness(GameData d, float x, float y, float radius)
+        {
+            PedEnt best = null; float bestD = radius * radius;
+            for (int i = 0; i < d.Peds.Count; i++)
+            {
+                PedEnt pd = d.Peds[i];
+                if (pd.Dead || pd.Panic > 0f) continue;
+                float dx = pd.X - x, dy = pd.Y - y;
+                float dist = dx * dx + dy * dy;
+                if (dist < bestD) { bestD = dist; best = pd; }
+            }
+            return best;
         }
 
         /* ---------------------------------------------------- pickups */
@@ -901,6 +1010,129 @@ namespace LocalTheftAuto
                     pk.X = c.x; pk.Y = c.y;
                 }
             }
+        }
+
+        /* ------------------------------------------- T8: the gas station */
+
+        // Drive-in repair, ported from game.js's gas station (game.js:1824-
+        // 1837, same 2s hold, same 150 price, same "takes cash, not
+        // questions" line). Score is the currency; the gas station is the
+        // honest in-world sink — drive-in costs time and exposure, so it
+        // can't be farmed like the garage.
+        public const int GasRepairPrice = 150;
+        public const float GasStationSeconds = 2f;
+
+        public static void GasStationStep(GameData d, float dt)
+        {
+            var s = d.State;
+            var p = d.Player;
+
+            // only counts while parked (slow/stopped) on a gas-station tile,
+            // in a drivable car — mirrors the JS atGas gate exactly
+            CarEnt car = p.InCar;
+            bool atGas = car != null && !car.Wrecked && car.Speed < 10f
+                && CityMap.IsGasStation(Mathf.FloorToInt(p.X / Cfg.Tile),
+                                        Mathf.FloorToInt(p.Y / Cfg.Tile));
+            if (!atGas)
+            {
+                p.GasTimer = 0f;
+                p.GasDone = false;
+                return;
+            }
+
+            p.GasTimer += dt;
+            if (p.GasDone) return;
+            if (p.GasTimer <= GasStationSeconds) return;
+            if (s.Score < GasRepairPrice) return;                     // can't afford — keep waiting (say once below)
+            if (p.Health >= 100f && car.Health >= 100f) return;       // nothing to repair
+
+            s.Score -= GasRepairPrice;
+            p.Health = 100f;
+            car.Health = 100f;
+            p.GasDone = true;   // one purchase per visit — drive off and back to buy again
+            s.Say("Full repair, -" + GasRepairPrice + ". The gas station takes cash, not questions.");
+        }
+
+        /* ------------------------------------------- T16: the garage */
+
+        // The garage is a WORLD trigger, not a menu: park any car on a
+        // garage tile for the same 2s hold the gas station uses and its
+        // build (body type, stats, paint, health) is stored as the owned
+        // ride — game.js saveGarage's contract, ported. The stored car
+        // spawns near the player's start on the next run (GameLoop.
+        // SpawnGarageCar) and survives busts, deaths and restarts, unlike
+        // every other stolen car. Free — ownership IS the prize.
+        public const float GarageSeconds = 2f;
+
+        public static void GarageStep(GameData d, float dt)
+        {
+            var s = d.State;
+            var p = d.Player;
+
+            CarEnt car = p.InCar;
+            bool atGarage = car != null && !car.Wrecked && car.Speed < 10f
+                && CityMap.IsGarage(Mathf.FloorToInt(p.X / Cfg.Tile),
+                                    Mathf.FloorToInt(p.Y / Cfg.Tile));
+            if (!atGarage)
+            {
+                p.GarageTimer = 0f;
+                p.GarageDone = false;
+                return;
+            }
+
+            p.GarageTimer += dt;
+            if (p.GarageDone) return;
+            if (p.GarageTimer <= GarageSeconds) return;
+
+            p.GarageDone = true;   // one save per visit — drive off and back to re-save
+            GarageStored = true;
+            // snapshot the build now — this car object won't survive the run.
+            // Stats are fully derived from the body type at drive time (see
+            // PlayerSys.Step), so only identity needs storing: body, paint,
+            // health — same contract as game.js saveGarage stored
+            // accel/topSpeed/gripMul/color/health, minus the stats JS rolled
+            // per car (Unity derives them from the body rows instead).
+            gBody = car.BodyType;
+            gR = car.Color.r; gG = car.Color.g; gB = car.Color.b;
+            gHealth = Mathf.Max(20f, car.Health);
+            s.Say("Car stored. It'll be waiting near your next start.");        }
+
+        // T16: garage contents live on Systems as plain state; GameLoop
+        // persists them inside SaveData (hasGarageCar + g* fields) on
+        // autosave, and LoadGame restores them for SpawnGarageCar.
+        public static bool GarageStored;
+        public static int gBody;
+        public static float gR, gG, gB, gHealth = 100f;
+
+        // T16: place the owned ride on a road tile in a ring around the
+        // player's spawn — game.js spawnGarageCar's exact trick (rejection
+        // sampling, 60 tries). No-op when nothing has been garaged yet or
+        // LoadGame invalidated it.
+        public static void SpawnGarageCar(GameData d)
+        {
+            if (!GarageStored) return;
+            Vector2 spawn = d.State.Spawn;
+            for (int tries = 0; tries < 60; tries++)
+            {
+                float ang = Random.value * Mathf.PI * 2f;
+                float r = 120f + Random.value * 500f;
+                float x = spawn.x + Mathf.Cos(ang) * r;
+                float y = spawn.y + Mathf.Sin(ang) * r;
+                if (CityMap.TypeAtPx(x, y) != Cfg.Road) continue;
+
+                var car = MakeCar(x, y, Random.Range(0, 4), true);
+                // rebuild the saved identity: body type drives both the mesh
+                // silhouette and the physics (BuildCar branches on the same
+                // seed) — resample Seed until BodyType matches gBody (1/4
+                // expected tries; 64 is overkill on purpose)
+                for (int i = 0; i < 64 && car.BodyType != gBody; i++)
+                    car.Seed = Random.Range(0, int.MaxValue);
+                car.Color = new Color(gR, gG, gB);
+                car.Health = gHealth;
+                d.Cars.Add(car);
+                return;
+            }
+            GarageStored = false;   // no road tile in range — drop gracefully, don't spawn garbage
         }
 
         public static void WeaponPickupStep(GameData d)
@@ -1040,10 +1272,17 @@ namespace LocalTheftAuto
                 {
                     ped.Dead = true; ped.Timer = 6f;
                     ped.FlingVx = Mathf.Cos(shotAng) * 140f; ped.FlingVy = Mathf.Sin(shotAng) * 140f;
-                    s.Say("Shots fired. The local police heard that.");
                 }
-                s.Wanted = Mathf.Min(5, s.Wanted + 1);
-                s.LastCrime = s.Time;
+                // T5: gunfire goes through the witness system — a shot that
+                // nobody living sees raises nothing (shots in the empty
+                // industrial blocks stay free); a witnessed shot starts the
+                // killable-reporter window. Gangster hits (calmed or killed)
+                // ALSO report when witnessed — a rival crew on your tail is
+                // still gunfire in the street.
+                if (!Systems.RaiseCrimeWitnessed(d, t))
+                    s.Say("Shots fired into the empty street. Nobody heard. Locally.");
+                else
+                    s.Say("Shots fired. Someone is running to report it.");
                 return;
             }
             CopEnt hitCop = null; float bestCop = float.MaxValue;
@@ -1265,12 +1504,13 @@ namespace LocalTheftAuto
             var s = d.State;
 
             // TunForceWeather (GameState): -1 = follow the clock below, 0 = pin
-            // Clear, 1 = pin Rain. Pinning leaves NextWeatherAt / WeatherEnds
-            // untouched, so un-pinning resumes the normal cycle instead of
-            // firing an immediate transition.
+            // Clear, 1 = pin Rain, 2 = pin Fog. Pinning leaves NextWeatherAt /
+            // WeatherEnds untouched, so un-pinning resumes the normal cycle
+            // instead of firing an immediate transition.
             if (s.TunForceWeather >= 0)
             {
-                s.Weather = s.TunForceWeather >= 1 ? Weather.Rain : Weather.Clear;
+                s.Weather = s.TunForceWeather >= 2 ? Weather.Fog
+                          : s.TunForceWeather >= 1 ? Weather.Rain : Weather.Clear;
                 return;
             }
 
@@ -1278,16 +1518,29 @@ namespace LocalTheftAuto
             {
                 if (t >= s.NextWeatherAt)
                 {
-                    s.Weather = Weather.Rain;
-                    s.WeatherEnds = t + 45.0 + Random.value * 30.0;
-                    s.Say("Rain rolling in. Roads are slicker.");
+                    // T10: fog joins the rotation — rarer than rain, holds
+                    // a shorter spell, and trades grip for very short
+                    // sightlines instead of slick roads
+                    if (Random.value < 0.3f)
+                    {
+                        s.Weather = Weather.Fog;
+                        s.WeatherEnds = t + 30.0 + Random.value * 20.0;
+                        s.Say("Fog bank rolling in. You can't see them; they can't see you.");
+                    }
+                    else
+                    {
+                        s.Weather = Weather.Rain;
+                        s.WeatherEnds = t + 45.0 + Random.value * 30.0;
+                        s.Say("Rain rolling in. Roads are slicker.");
+                    }
                 }
             }
             else if (t >= s.WeatherEnds)
             {
+                bool wasFog = s.Weather == Weather.Fog;
                 s.Weather = Weather.Clear;
                 s.NextWeatherAt = t + 60.0 + Random.value * 60.0;
-                s.Say("Skies clearing up.");
+                s.Say(wasFog ? "Fog lifting." : "Skies clearing up.");
             }
         }
 

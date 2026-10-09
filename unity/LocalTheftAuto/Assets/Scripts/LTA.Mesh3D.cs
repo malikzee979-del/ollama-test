@@ -695,7 +695,15 @@ namespace LocalTheftAuto
             v.BaseColor = tint;
 
             float[,] prof = cop ? SedanProf
-                : (seed % 3 == 0 ? SedanProf : (seed % 3 == 1 ? HatchProf : VanProf));
+                : ((seed & 7) == 4 ? null   // T11: bike — built by BuildBike below, no car profile
+                : (seed % 3 == 0 ? SedanProf : (seed % 3 == 1 ? HatchProf : VanProf)));
+
+            if (prof == null)
+            {
+                BuildBike(v, t, tint, seed);
+                return v;
+            }
+
             int pn = prof.GetLength(0);
             float zF = prof[0, 0], zR = prof[pn - 1, 2];
             float roofY = 0f;
@@ -849,6 +857,104 @@ namespace LocalTheftAuto
             return 3.4f;
         }
 
+        /* ---------------------------------------------------- motorbike (T11) */
+
+        // Built when BuildCar's seed branch is (seed & 7) == 4. Deliberately
+        // NOT a CarBodyMesh profile row: a bike shares almost nothing with the
+        // car shell — narrow inline frame, two big wheels, exposed rider foam
+        // block standing in for the seat/tank, one headlight. It fills the
+        // same CarVisual contract so every existing consumer (sync pass,
+        // audio, wreck tint, police) works unmodified:
+        //   Body         — the frame mesh, tinted with the car paint
+        //   Wheels[+-2]  — front and rear, spun by SpinWheels
+        //   BrakeA/B     — both bound to the ONE tail lamp (index twice)
+        //   Lights       — pool sprite + beam; Beams[2] with both indexes on
+        //                  the single spot (the shadow-flag pass indexes [0]
+        //                  and [1] unconditionally)
+        //   SirenA/B/Glow stay null — bikes are never cop vehicles.
+        static void BuildBike(CarVisual v, Transform t, Color tint, int seed)
+        {
+            // frame runs z -20 (tail) .. +22 (fork); wheels r=4.4
+            const float wheelZF = 15f, wheelZR = -15f, wheelR = 4.4f;
+
+            var sh = FlatSprite(t, "shadow", SpriteKit.Circle, new Color(0, 0, 0, 0.35f), 0.4f);
+            sh.transform.localScale = new Vector3(34f / 32f, 12f / 32f, 1f);   // long-narrow blob
+            sh.transform.localRotation = Quaternion.Euler(90f, 90f, 0f);      // long axis along z
+
+            var frame = new MB();
+            Color dark = tint * 0.5f, chrome = new Color(0.72f, 0.74f, 0.78f);
+
+            // main spine: a slim box from tail tank to fork head
+            frame.Quad(new Vector3(-1.6f, 7.2f, wheelZR + 4f), new Vector3(1.6f, 7.2f, wheelZF - 5f),
+                       new Vector3(1.6f, 11.5f, wheelZF - 5f), new Vector3(-1.6f, 11.5f, wheelZR + 4f), tint);
+            // seat + tank hump (paint), centered above the spine
+            frame.Quad(new Vector3(-2.2f, 11.5f, -12f), new Vector3(2.2f, 11.5f, -12f),
+                       new Vector3(2.2f, 15.5f, -3f), new Vector3(-2.2f, 15.5f, -3f), tint);
+            frame.Quad(new Vector3(-2.2f, 15.5f, -3f), new Vector3(2.2f, 15.5f, -3f),
+                       new Vector3(2.2f, 13.5f, 2f), new Vector3(-2.2f, 13.5f, 2f), tint);
+            // front fork: two chrome struts up from the front axle to the bars
+            frame.Quad(new Vector3(-0.9f, wheelR, wheelZF - 1.4f), new Vector3(-0.9f, 16.5f, wheelZF + 4.4f),
+                       new Vector3(0.9f, 16.5f, wheelZF + 4.4f), new Vector3(0.9f, wheelR, wheelZF - 1.4f), chrome);
+            // handlebar
+            frame.Quad(new Vector3(-7f, 17f, wheelZF + 4.6f), new Vector3(7f, 17f, wheelZF + 4.6f),
+                       new Vector3(7f, 18.2f, wheelZF + 3.8f), new Vector3(-7f, 18.2f, wheelZF + 3.8f), Cfg.Hex("#1c2029"));
+            // rear fender over the tail wheel
+            frame.Quad(new Vector3(-2f, 12.5f, wheelZR - 3.2f), new Vector3(2f, 12.5f, wheelZR - 3.2f),
+                       new Vector3(2f, 14.2f, wheelZR + 2f), new Vector3(-2f, 14.2f, wheelZR + 2f), dark);
+            // underbox so it isn't paper-thin edge-on
+            frame.Quad(new Vector3(-1.6f, 5f, wheelZR + 4f), new Vector3(1.6f, 5f, wheelZR + 4f),
+                       new Vector3(1.6f, 7.2f, wheelZF - 5f), new Vector3(-1.6f, 7.2f, wheelZF - 5f), dark);
+            v.Body = MeshGo(t, "bike-frame", frame.Build(), Vector3.zero);
+            v.Body.sharedMaterial = CarPaint;
+
+            var wheel = WheelMesh(wheelR, 3.4f, 12, WheelC, HubC);
+            v.Wheels = new Transform[2];
+            v.Wheels[0] = MeshGo(t, "wheel-f", wheel, new Vector3(0f, wheelR, wheelZF)).transform;
+            v.Wheels[1] = MeshGo(t, "wheel-r", wheel, new Vector3(0f, wheelR, wheelZR)).transform;
+
+            Box(t, "head", 4.4f, 4.4f, 1.6f, new Vector3(0f, 14f, wheelZF + 4.2f), HeadlightC);
+            v.BrakeA = Box(t, "tail", 3.4f, 2f, 0.8f, new Vector3(0f, 13f, wheelZR - 3.6f), Color.white);
+            Tint(v.BrakeA, TailDim);
+            v.BrakeB = v.BrakeA;   // one lamp, both sync slots
+
+            // headlights: shared pool + one real spot, both Beams slots bound
+            // to it (GameLoop's shadow-flag pass touches Beams[0] and [1]).
+            v.Lights = new GameObject("lights");
+            v.Lights.transform.SetParent(t, false);
+            var conePivot = new GameObject("cone-pivot");
+            conePivot.transform.SetParent(v.Lights.transform, false);
+            conePivot.transform.localPosition = new Vector3(0f, 0.5f, 0f);
+            conePivot.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            var cone = new GameObject("cone");
+            cone.transform.SetParent(conePivot.transform, false);
+            cone.transform.localPosition = new Vector3(0f, 70f, 0f);
+            cone.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            var csr = cone.AddComponent<SpriteRenderer>();
+            csr.sprite = SpriteKit.Cone;
+            csr.color = Color.white;
+
+            var beamGo = new GameObject("beam");
+            beamGo.transform.SetParent(v.Lights.transform, false);
+            beamGo.transform.localPosition = new Vector3(0f, 14f, wheelZF + 4.2f);
+            beamGo.transform.localRotation = Quaternion.Euler(12f, 0f, 0f);
+            var bl = beamGo.AddComponent<Light>();
+            bl.type = LightType.Spot;
+            bl.color = HeadlightC;
+            bl.range = 220f;
+            bl.spotAngle = 52f;
+            bl.innerSpotAngle = 24f;
+            bl.intensity = 6f;
+            bl.shadows = LightShadows.None;
+            v.Beams = new Light[2];
+            v.Beams[0] = bl;
+            v.Beams[1] = bl;
+
+            // silhouette jitter — same micro-variation the car branch gets,
+            // scaled to a bike (length only, never width)
+            float len = 0.94f + (Mathf.Abs(seed / 3) % 4) * 0.035f;
+            t.localScale = new Vector3(1f, 1f, len);
+        }
+
         /* ---------------------------------------------------- pedestrians */
 
         static readonly Color[] Pants =
@@ -916,6 +1022,12 @@ namespace LocalTheftAuto
             bool skirt = hash % 5 == 0;
             Color torsoC = jacket ? Jackets[hash % Jackets.Length] : shirt;
             Color legC = skirt ? skin : pants;
+
+            // T13: per-ped height from the same hash — 0.9..1.12 of the base
+            // proportions. Reuses the "silhouette jitter" idea from BuildCar;
+            // Y-only because widths must keep matching collision/limb pivots.
+            float hScale = 0.9f + (hash % 7) * 0.035f;
+            v.HeightScale = hScale;
 
             var sh = FlatSprite(t, "shadow", SpriteKit.Circle, new Color(0, 0, 0, 0.3f), 0.4f);
             sh.transform.localScale = new Vector3(15f / 32f, 11f / 32f, 1f);
@@ -1085,6 +1197,32 @@ namespace LocalTheftAuto
             var glow = FlatSprite(root.transform, "glow", SpriteKit.Glow,
                 new Color(tint.r, tint.g, tint.b, 0.5f), 0.6f);
             glow.transform.localScale = new Vector3(90f / 128f, 90f / 128f, 1f);
+            return root;
+        }
+
+        // T15: street signboard standing beside an active mission marker —
+        // the "thank you for your cooperation" board that gives the glowing
+        // beam a physical anchor on the pavement. A post, a framed panel
+        // with mission-blue trim, and a small lamp cap that echoes the
+        // marker color. Built once, repositioned every frame alongside the
+        // marker by SyncMission.
+        public static GameObject BuildMissionBoard(Color tint)
+        {
+            Init();
+            var root = new GameObject("mission-board");
+
+            // post: slim dark pole, ground to panel height
+            Box(root.transform, "post", 1.6f, 30f, 1.6f, new Vector3(0f, 15f, 0f), Cfg.Hex("#232a34"));
+            // panel: wider than tall, centered at the top of the post
+            Box(root.transform, "panel", 14f, 10f, 1.2f, new Vector3(0f, 31f, 0f), Cfg.Hex("#1b222c"));
+            // face: mission-blue inset so the panel reads as "official"
+            Box(root.transform, "face", 11f, 7f, 0.3f, new Vector3(0f, 31f, 0.7f),
+                new Color(tint.r * 0.85f, tint.g * 0.85f, tint.b * 0.85f));
+            // cap: a little lamp box echoing the tint above the panel
+            Box(root.transform, "cap", 3f, 1.6f, 2.4f, new Vector3(0f, 37f, 0f), Cfg.Hex("#10141c"));
+            var glow = FlatSprite(root.transform, "cap-glow", SpriteKit.Glow,
+                new Color(tint.r, tint.g, tint.b, 0.4f), 38.2f);
+            glow.transform.localScale = new Vector3(24f / 128f, 24f / 128f, 1f);
             return root;
         }
 

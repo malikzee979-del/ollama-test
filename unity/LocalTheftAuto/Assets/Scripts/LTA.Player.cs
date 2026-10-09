@@ -153,19 +153,14 @@ namespace LocalTheftAuto
             p.InCar = best;
             p.Health = best.Health;
 
-            bool seen = false;
-            for (int i = 0; i < d.Peds.Count; i++)
+            // T5: car theft goes through the witness system — the old
+            // inline 130px loop raised stars instantly; now a witnessed
+            // theft starts the report window (killable witness) and an
+            // unwitnessed one raises nothing.
+            bool reported = Systems.RaiseCrimeWitnessed(d, s.Time);
+            if (reported)
             {
-                PedEnt pd = d.Peds[i];
-                if (pd.Dead) continue;
-                float wx = pd.X - best.X, wy = pd.Y - best.Y;
-                if (wx * wx + wy * wy < 130f * 130f) { seen = true; pd.Panic = 2f; break; }
-            }
-            if (seen)
-            {
-                s.Wanted = Mathf.Min(5, s.Wanted + 1);
-                s.LastCrime = s.Time;
-                s.Say("Someone saw that — locally. The police are coming.");
+                s.Say("Someone saw that — locally. The police will hear about it.");
             }
             else
             {
@@ -338,10 +333,18 @@ namespace LocalTheftAuto
                                 // readable feedback instead of an instant squash
                                 ped.FlingVx = fX * spd * 0.55f; ped.FlingVy = fY * spd * 0.55f;
                                 ped.FlingT = 0.35f;
-                                s.Say("Pedestrian down. The local police are now locally interested.");
                             }
-                            s.Wanted = Mathf.Min(5, s.Wanted + 1);
-                            s.LastCrime = s.Time;
+                            // T5: run-over goes through the witness system.
+                            // Living witnesses outrank the victim: the killed
+                            // ped panicked?? no — a dead ped can't report, so
+                            // RaiseCrimeWitnessed picks a LIVING onlooker. If
+                            // nobody living saw it, cold-blooded and free.
+                            if (!Systems.RaiseCrimeWitnessed(d, s.Time))
+                                s.Say(ped.Kind == PedKind.Gangster
+                                    ? "No witnesses. The crew will know anyway."
+                                    : "Nobody saw that. Locally, at least.");
+                            else
+                                s.Say("Someone saw that — the police will hear about it.");
                         }
                     }
                 }
@@ -358,7 +361,9 @@ namespace LocalTheftAuto
                     if (d2 < 30f * 30f && d2 > 0.01f)
                     {
                         float dist = Mathf.Sqrt(d2);
-                        float push = (30f - dist) / 2f;
+                        // T11: per-body radius — the bike collides over a
+                        // genuinely narrower circle than the flat 30px cars use
+                        float push = (Cfg.BodyRadius[car.BodyType] - dist) / 2f;
                         o.X += ox / dist * push; o.Y += oy / dist * push;
                         // Realism pass (Phase 3): mass-aware impulse. A van
                         // (mass 1.5) ramming a hatch (0.8) shoves it further
@@ -395,6 +400,14 @@ namespace LocalTheftAuto
                 // gang wars: Q cycles the guns the player owns (on-foot only,
                 // same as firing itself)
                 if (Input.GetKeyDown(KeyCode.Q) || Input.GetKeyDown(KeyCode.JoystickButton3)) Systems.CycleWeapon(p);
+
+                // T6 vehicle radio: [ / ] tap through the stations (and the
+                // gamepad's Back/Start… no — those pause. Radio on the stick's
+                // click and Y would collide with weapon cycling, so the radio
+                // stays keyboard-only for now). Works on foot or in the car —
+                // but GameAudio.Step only makes it audible in a car.
+                if (Input.GetKeyDown(KeyCode.LeftBracket)) GameAudio.CycleRadio(d, -1);
+                if (Input.GetKeyDown(KeyCode.RightBracket)) GameAudio.CycleRadio(d, 1);
 
                 if (p.Weapon != WeaponKind.None && !swallowFire)
                 {

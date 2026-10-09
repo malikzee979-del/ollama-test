@@ -239,26 +239,34 @@ namespace LocalTheftAuto
         public const float ShaftAlphaRainMax = 3.4f;  // multiplier at full rainIntensity
 
         // ---- Realism pass: per-body-type driving stats (Phase 3) ----
-        // Body type is derived from CarEnt.Seed % 3 so the MESH silhouette
-        // (MeshKit.BuildCar picks Sedan/Hatch/Van off the same seed) and the
-        // PHYSICS always agree — a car that looks like a van drives like a
-        // van. Cop cars are always Sedan (both mesh and physics). Indexed by
-        // BodySedan / BodyHatch / BodyVan.
-        public const int BodySedan = 0, BodyHatch = 1, BodyVan = 2;
-        public static readonly float[] BodyAccel = { 250f, 300f, 200f };      // units/s^2 — hatch nippy, van sluggish
-        public static readonly float[] BodyTopSpeed = { 280f, 250f, 305f };   // van tops out highest, hatch lowest
-        public static readonly float[] BodyReverse = { -95f, -90f, -80f };
-        public static readonly float[] BodyGrip = { 8f, 9f, 6f };             // cornering grip — van floats
-        public static readonly float[] BodyHandbrakeGrip = { 2.2f, 2.4f, 1.8f };
-        public static readonly float[] BodyMass = { 1f, 0.8f, 1.5f };         // used for crash impulses
-        public static readonly float[] BodyCruiseMult = { 1f, 0.95f, 1.15f }; // AI traffic cruise factor
+        // Body type is derived from CarEnt.Seed so the MESH silhouette
+        // (MeshKit.BuildCar picks Sedan/Hatch/Van/Bike off the same seed) and
+        // the PHYSICS always agree — a car that looks like a van drives like
+        // a van. Cop cars are always Sedan (both mesh and physics). Indexed
+        // by BodySedan / BodyHatch / BodyVan / BodyBike.
+        // T11: BodyBike — narrow, fast, twitchy. Its Seed branch is
+        // (seed % 8) == 4 so bikes are ~12.5% of spawned traffic, and the
+        // leftover sedans/hatches/vans keep their original 0/1/2 branches.
+        public const int BodySedan = 0, BodyHatch = 1, BodyVan = 2, BodyBike = 3;
+        public static readonly float[] BodyAccel = { 250f, 300f, 200f, 380f };      // units/s^2 — hatch nippy, bike launch hardest
+        public static readonly float[] BodyTopSpeed = { 280f, 250f, 305f, 340f };  // bike tops out highest
+        public static readonly float[] BodyReverse = { -95f, -90f, -80f, -40f };   // bikes barely reverse
+        public static readonly float[] BodyGrip = { 8f, 9f, 6f, 10.5f };           // cornering grip — bike leans and bites… until it doesn't
+        public static readonly float[] BodyHandbrakeGrip = { 2.2f, 2.4f, 1.8f, 1.4f }; // handbrake on a bike = slide out
+        public static readonly float[] BodyMass = { 1f, 0.8f, 1.5f, 0.45f };       // used for crash impulses — a bike LOSES head-ons
+        public static readonly float[] BodyCruiseMult = { 1f, 0.95f, 1.15f, 0.9f }; // AI traffic cruise factor
+        // T11: half-width for car-car push / probe tests. Cars share the
+        // historical 30f flat circle; the bike is genuinely narrower.
+        public static readonly float[] BodyRadius = { 30f, 30f, 30f, 16f };
 
         // ---- Realism pass: braking and power band (Phase 14) ----
         // Brakes are a separate, much stronger deceleration than the engine's
         // own accel — real cars stop far faster than they build speed. Roughly
         // 1.8-2x the matching BodyAccel entry, van braking hardest relative to
-        // its own (weak) accel since it has the most mass to shed.
-        public static readonly float[] BodyBrake = { 480f, 520f, 420f };
+        // its own (weak) accel since it has the most mass to shed. The bike
+        // brakes hard per-kilo (two wheels, no engine block to carry) but its
+        // short wheelbase means the rear is always threatening to pass the front.
+        public static readonly float[] BodyBrake = { 480f, 520f, 420f, 620f };
         // PowerBandFloor: fraction of full accel left once a car is right at
         // its top speed — engines lose pull near the limiter instead of
         // shoving flat-out acceleration all the way to the cap.
@@ -385,6 +393,46 @@ namespace LocalTheftAuto
 
     public static class CityMap
     {
+        // T8: the corner-tile service scheme, ported from the JS original's
+        // isGasStation/isPaintShop/isGarage (game.js:460-478). Same math,
+        // same rejection pattern — each service excludes the corners the
+        // others claimed so no two ever share a tile, and each gates on a
+        // distinct Hash2 salt so placement stays deterministic across
+        // reloads (parity: identical to the JS placement at equal coords;
+        // Unity's larger 144-tile world simply has more of them).
+        public static bool IsCorner(int tx, int ty)
+        {
+            int rx = tx % Cfg.BlockTiles, ry = ty % Cfg.BlockTiles;
+            return (rx == 3 || rx == 9) && (ry == 3 || ry == 9);
+        }
+
+        public static bool IsGasStation(int tx, int ty)
+        {
+            if (!IsCorner(tx, ty)) return false;
+            return JSRng.Hash2(tx * 71, ty * 73) < 0.045;
+        }
+
+        public static bool IsPaintShop(int tx, int ty)
+        {
+            if (!IsCorner(tx, ty)) return false;
+            if (IsGasStation(tx, ty)) return false;
+            return JSRng.Hash2(tx * 59, ty * 61) < 0.045;
+        }
+
+        public static bool IsGarage(int tx, int ty)
+        {
+            if (!IsCorner(tx, ty)) return false;
+            if (IsGasStation(tx, ty) || IsPaintShop(tx, ty)) return false;
+            return JSRng.Hash2(tx * 47, ty * 53) < 0.045;
+        }
+
+        public static bool IsMart(int tx, int ty)
+        {
+            if (!IsCorner(tx, ty)) return false;
+            if (IsGasStation(tx, ty) || IsPaintShop(tx, ty) || IsGarage(tx, ty)) return false;
+            return JSRng.Hash2(tx * 83, ty * 89) < 0.045;
+        }
+
         public static int TileType(int tx, int ty)
         {
             if (tx < 0 || ty < 0 || tx >= Cfg.World || ty >= Cfg.World) return Cfg.Bldg;
@@ -511,12 +559,19 @@ namespace LocalTheftAuto
         public CarVisual Vis;
         // Realism pass (Phase 3): set once at spawn, drives BOTH the mesh
         // silhouette (BuildCar) and the per-body-type physics lookup so a
-        // car that looks like a van handles like one. Seed % 3 picks the
-        // type — see Cfg.BodySedan/Hatch/Van.
+        // car that looks like a van handles like one. Branch on Seed:
+        // %8==4 → bike, else %3 picks car (0/1/2) so 3/4 of seeds keep
+        // the original car mix and bikes land at ~12.5% of traffic.
         public int Seed;
 
-        // 0=sedan 1=hatch 2=van — matches MeshKit.BuildCar's seed%3 pick.
-        public int BodyType { get { return Seed % 3; } }
+        public int BodyType
+        {
+            get
+            {
+                if ((Seed & 7) == 4) return Cfg.BodyBike;
+                return Seed % 3;   // follows MeshKit.BuildCar's car pick
+            }
+        }
     }
 
     // What a ped does with its life. Kept on PedEnt rather than split into
@@ -571,6 +626,11 @@ namespace LocalTheftAuto
         public float X, Y, A, Speed;
         public int Flash;
         public float Health = 100f;
+        // T9: SWAT unit at 5★ — a heavier cruiser that takes roughly double the
+        // punishment and drives faster. The initializer stays the stock
+        // 100f; a SWAT spawn overrides with SwatHealth, and everything that
+        // reads cop health keeps working unchanged (the flag is the delta).
+        public bool Swat;
         public double LastShotAt = -1e9;   // return-fire cooldown, wanted >= 3
         public CarVisual Vis;
 
@@ -642,9 +702,19 @@ namespace LocalTheftAuto
     // the three gun tiers; WeaponKind - 1 indexes the Cfg.Weapon* stat arrays
     public enum WeaponKind { None = 0, Pistol = 1, Smg = 2, Shotgun = 3 }
 
-    public class PlayerState
-    {
-        public float X, Y, A;
+        public class PlayerState
+        {
+            // T8: how long the player has been sitting on a gas-station tile —
+            // the drive-in repair charges after GasStationSeconds, mirroring
+            // game.js's gasTimer (>2s hold) so the purchase is deliberate
+            public float GasTimer;
+            public bool GasDone;
+            // T16: the same hold pattern for the garage tile — parking 2s
+            // stores the current car's build (stats/color/health) as the
+            // owned ride (GarageStore, like game.js saveGarage)
+            public float GarageTimer;
+            public bool GarageDone;
+            public float X, Y, A;
         public float Vx, Vy;
         public CarEnt InCar;
         public float Health = 100f;
@@ -672,7 +742,7 @@ namespace LocalTheftAuto
 
     public enum MissionKind { Delivery, Rampage, Steal, GangWar }
 
-    public enum Weather { Clear, Rain }
+    public enum Weather { Clear, Rain, Fog }   // T10: Fog is the third state
 
     public class GameState
     {
@@ -681,6 +751,18 @@ namespace LocalTheftAuto
         public double LastCrime = -1e9;
         public double LastDecay;
         public double LastCopSpawn;
+
+        // T5 witness-based crime reporting: a crime is reported only if a
+        // living, non-panicked ped is near enough to see it. Until ReportAt
+        // elapses the reporter is "on their way to the phone" — killing the
+        // reporter inside the window cancels the report and the stars never
+        // rise. One pending report at a time; a NEW crime while one is
+        // pending re-arms the delay from now (report never silently drops
+        // — the total wait can only get longer, never shorter).
+        public PedEnt Reporter;                  // the ped on their way to report
+        public double ReportAt = -1e9;           // game-clock time the stars land
+        public bool ReportPending;
+
         public float Busted;
         public float Wasted;              // >0 while the WASTED screen holds; counted down in LawStep (on simDt, so a pause freezes it)
         public bool Paused;               // set via Hud.SetPaused; gates simDt in GameLoop.Update
@@ -698,6 +780,14 @@ namespace LocalTheftAuto
         public double MissionEnds;      // deadline on the game clock
         public double NextMissionAt;    // when the next job is offered
         public int MissionReward;
+        // T7 steal-damage-cap variant: a harsher steal contract that only
+        // pays if the mark still runs (health above this). 0 = no cap
+        // (classic steal). Set at spawn; read in StepSteal.
+        public int StealMaxDamagePct;
+        // T7 reward ladder: lifetime completed jobs, persisted with the
+        // save (SaveData.completedJobs, default 0 for old saves — the
+        // JsonUtility contract). All mission kinds bump it.
+        public int CompletedJobs;
         public int RampageGoal, RampageCount;     // cars to wreck / wrecked so far
         public CarEnt StealTarget;                // the specific car to steal + deliver
         public int GangWarGoal, GangWarCount;     // gangsters to drop / dropped so far
@@ -726,7 +816,7 @@ namespace LocalTheftAuto
         // keep them all.
         public float TunAccel = 1f, TunTopSpeed = 1f, TunGrip = 1f;
         public float TunCopSpawnInterval = 1.5f;   // was a literal in Systems.LawStep
-        public int TunForceWeather = -1;           // -1 = auto, 0 = Clear, 1 = Rain (2 = Fog in Stage 4)
+        public int TunForceWeather = -1;           // -1 = auto, 0 = Clear, 1 = Rain, 2 = Fog
         public float TunDayOverride = -1f;         // -1 = follow Cfg.NightTheme, else 0..1 dayAmount
         public bool GodMode;
 
@@ -766,6 +856,16 @@ namespace LocalTheftAuto
         public int score;
         public int wanted;
         public int highScore;
+        // T7 reward ladder: lifetime completed jobs. Absent in old saves →
+        // 0 by the JsonUtility contract (the tier naturally re-earns).
+        public int completedJobs;
+        // T16: the owned ride, saved by parking on a garage tile 2s
+        // (garage world trigger — like game.js saveGarage in lta-garage).
+        // Absent in old saves → invalid → no owned car spawns.
+        public bool hasGarageCar;
+        public int gBody;                        // Cfg.Body* index (Cfg.Body*)
+        public float gR, gG, gB;                 // paint
+        public float gHealth;
         public bool valid;      // guards against reading an empty PlayerPrefs string
     }
 
@@ -789,10 +889,28 @@ namespace LocalTheftAuto
     // is the only multiplier that reaches PlayClipAtPoint one-shots (crash,
     // footsteps, tire screech, distant gunfire), and per-frame application
     // gives the settings screen live preview with no extra plumbing.
+    // T6: GetInt/SetInt back simple non-serialized values (the radio
+    // station) onto their OWN PlayerPrefs keys — deliberately NOT fields on
+    // LtaSettings, because adding fields there would need a version bump on
+    // the shape comment and the radio station is not a "setting" in the
+    // settings-page sense (no stepper on that page drives it).
     public static class SettingsStore
     {
         const string Key = "lta_settings";
         static LtaSettings loaded;
+
+        // T6: small int values keyed separately; a corrupt or absent key
+        // reads back the caller's default
+        public static int GetInt(string slot, int fallback)
+        {
+            return PlayerPrefs.GetInt(slot, fallback);
+        }
+
+        public static void SetInt(string slot, int value)
+        {
+            PlayerPrefs.SetInt(slot, value);
+            PlayerPrefs.Save();
+        }
 
         public static float MasterVolume
         {
@@ -878,5 +996,11 @@ namespace LocalTheftAuto
         public MeshRenderer Head;
         public Transform LegA, LegB;   // swing pivots
         public Transform ArmA, ArmB;
+        // T13: per-ped proportions + panic cower. HeightScale comes from the
+        // same build hash as the outfit so a ped's look stays deterministic;
+        // CowerT (0 = normal, 1 = fully crouched) drives the cower blend in
+        // GameLoop.SyncPeds.
+        public float HeightScale = 1f;
+        public float CowerT;   // sync-pass state, not set by BuildPed
     }
 }

@@ -25,12 +25,17 @@ namespace LocalTheftAuto
         const float SirenRadius = 420f;     // sirens carry further
         const float GunshotRadius = 460f;   // firefights are heard from across a street
 
-        // per-body-type engine base frequency, indexed by Cfg.Body*; [3] = cop
-        static readonly float[] EngineFreq = { 55f, 64f, 42f, 52f };
+        // per-body-type engine base frequency, indexed by Cfg.Body*;
+        // [3] = cop, [4] = bike (T11) — bike whine sits an octave up
+        static readonly float[] EngineFreq = { 55f, 64f, 42f, 52f, 110f };
 
-        static AudioSource ambient;
-        static AudioClip ambientClip;
-        static AudioClip[] engineClips = new AudioClip[4];
+        // T18: one ambient bed per district (0 residential, 1 downtown,
+        // 2 industrial). Crossfaded on boundary cross: two sources, only
+        // the incoming one rises, the outgoing falls — no click, no pop.
+        static AudioClip[] districtClips = new AudioClip[3];
+        static AudioSource ambientA, ambientB;   // A = playing, B = fading in
+        static int districtCur = -1;             // -1 = not yet initialized
+        static AudioClip[] engineClips = new AudioClip[5];
         static AudioClip sirenClip, gunshotClip, screechClip;
         static AudioClip[] footClips = new AudioClip[2];   // 0 concrete, 1 grass
 
@@ -48,13 +53,16 @@ namespace LocalTheftAuto
 
         public static void Init(GameData d)
         {
-            if (ambient != null) return;   // survives soft re-init; rebuilt after domain reload
+            if (ambientA != null) return;   // survives soft re-init; rebuilt after domain reload
 
             // Real recordings (Assets/Resources/Audio — see CREDITS.md there)
             // with the synthesized bakes as fallback if a clip is missing.
             engineClips[0] = GameAudio.Load("engine-sedan", () => GameAudio.BakeEngine(EngineFreq[0]));
             engineClips[1] = GameAudio.Load("engine-hatch", () => GameAudio.BakeEngine(EngineFreq[1]));
             engineClips[2] = GameAudio.Load("engine-van", () => GameAudio.BakeEngine(EngineFreq[2]));
+            // T11: bike engine — same bake path, an octave up; falls back to
+            // the synthesized whine like the car clips when no recording exists
+            engineClips[4] = GameAudio.Load("engine-bike", () => GameAudio.BakeEngine(EngineFreq[4]));
             engineClips[3] = GameAudio.Load("engine-cop", () => GameAudio.BakeEngine(EngineFreq[3]));
             sirenClip = GameAudio.Load("siren", GameAudio.BakeSiren);
             gunshotClip = GameAudio.Load("gun-pistol", GameAudio.BakeGunshot);
@@ -62,14 +70,22 @@ namespace LocalTheftAuto
             footClips[1] = GameAudio.Load("step-grass", () => BakeFootstep(true));
             screechClip = GameAudio.Load("skid", BakeScreech);
 
-            ambientClip = GameAudio.Load("ambience", BakeAmbient);
+            // T18: one ambient bed per district (recorded/baked fallback kept
+            // for all three — "ambience" is the old city bed, reused as the
+            // residential loop so nothing disappears)
+            districtClips[CityRenderer.Residential] = GameAudio.Load("ambience", BakeAmbient);
+            districtClips[CityRenderer.Downtown] = GameAudio.Load("ambience-downtown", BakeAmbientDowntown);
+            districtClips[CityRenderer.Industrial] = GameAudio.Load("ambience-industrial", BakeAmbientIndustrial);
             var go = new GameObject("ambient");
-            ambient = go.AddComponent<AudioSource>();
-            ambient.clip = ambientClip;
-            ambient.loop = true;
-            ambient.volume = 0f;
-            ambient.spatialBlend = 0f;
-            ambient.Play();
+            ambientA = go.AddComponent<AudioSource>();
+            ambientA.loop = true;
+            ambientA.volume = 0f;
+            ambientA.spatialBlend = 0f;
+            ambientB = go.AddComponent<AudioSource>();
+            ambientB.loop = true;
+            ambientB.volume = 0f;
+            ambientB.spatialBlend = 0f;
+            districtCur = -1;
 
             lastSkidCount = d.Skids.Count;
             lastSparkCount = d.Particles.Count;
@@ -77,7 +93,7 @@ namespace LocalTheftAuto
 
         public static void Step(GameData d, float dt)
         {
-            if (ambient == null) return;
+            if (ambientA == null) return;
             var p = d.Player;
             float px = p.X, py = p.Y;
 
@@ -199,9 +215,31 @@ namespace LocalTheftAuto
             }
             lastSparkCount = d.Particles.Count;
 
-            // ---- ambient city bed, ducked when rain takes over the mix ----
+            // ---- ambient city bed (T18: per-district, crossfaded) ----
+            // which district's bed is playing is decided by the player's
+            // block; a boundary cross fades the incoming source up and the
+            // outgoing one down. Rain ducks whichever pair is live.
+            int pDist = CityRenderer.District(
+                Mathf.FloorToInt(px / Cfg.Tile / Cfg.BlockTiles),
+                Mathf.FloorToInt(py / Cfg.Tile / Cfg.BlockTiles));
+            if (pDist != districtCur && districtClips[pDist] != null)
+            {
+                // swap roles: the old A fades out, the new district's B fades in
+                var swap = ambientA;
+                ambientA = ambientB;
+                ambientB = swap;
+                if (ambientA.clip != districtClips[pDist])
+                {
+                    ambientA.clip = districtClips[pDist];
+                    if (!ambientA.isPlaying) ambientA.Play();
+                }
+                districtCur = pDist;
+            }
             float aTarget = d.State.Weather == Weather.Rain ? 0.015f : 0.07f;
-            ambient.volume = Mathf.MoveTowards(ambient.volume, aTarget, 0.4f * dt);
+            ambientA.volume = Mathf.MoveTowards(ambientA.volume, aTarget, 0.4f * dt);
+            // B is either the fading-out previous district or an idle twin;
+            // MoveTowards drives both cases to zero so it always rests silent
+            ambientB.volume = Mathf.MoveTowards(ambientB.volume, 0f, 0.4f * dt);
         }
 
         /* ---------------------------------------------------- helpers */
@@ -228,7 +266,7 @@ namespace LocalTheftAuto
             if (carEngine.TryGetValue(v, out s) && s != null) return s;
             s = NewEntitySrc("carEngine", v.Root.transform, true);
             s.priority = 96;
-            s.clip = engineClips[Mathf.Clamp(bodyType, 0, 3)];
+            s.clip = engineClips[Mathf.Clamp(bodyType, 0, engineClips.Length - 1)];
             carEngine[v] = s;
             return s;
         }
@@ -271,10 +309,37 @@ namespace LocalTheftAuto
             return s;
         }
 
+        // Restart-path cleanup, called by GameLoop.RestartRun (T12: replaces
+        // the reflection-by-name hack that used to live there). Same three
+        // concerns, in the same order the old hack had them:
+        //   1. the ambient source root — DestroyImmediate (not Destroy) so
+        //      the static `ambient` reference is fake-null RIGHT NOW and the
+        //      next Init() actually rebuilds; the root sweep's deferred
+        //      Destroy would leave it looking alive past InitGame.
+        //   2. the entity-keyed source tables — their keys (CarVisual /
+        //      CopEnt) and the sources' parent visuals are all about to be
+        //      destroyed; fresh tables build on demand afterwards.
+        //   3. the distant-gunfire gate, compared against State.Time — the
+        //      old session's clock value would silence firefights for
+        //      minutes after a restart if left as-is.
+        public static void Reset()
+        {
+            var amb = GameObject.Find("ambient");
+            if (amb != null) Object.DestroyImmediate(amb);
+            ambientA = null;    // T18: the pair lives on that root — sweep kills
+            ambientB = null;    // it; drop the references so Init rebuilds
+            districtCur = -1;
+            carEngine.Clear();
+            copEngine.Clear();
+            copSiren.Clear();
+            nextSparkGun = 0f;
+        }
+
         /* --------------------------------------------------- synthesis */
 
         // deep brown-noise swell with a slow amplitude wobble — the city's
-        // constant low hum, deliberately beneath the engine/siren layer
+        // constant low hum, deliberately beneath the engine/siren layer.
+        // T18: the residential district keeps this as its bed.
         static AudioClip BakeAmbient()
         {
             var data = new float[Rate * 2];
@@ -289,6 +354,49 @@ namespace LocalTheftAuto
                 data[i] = prev * 1.4f * mod;
             }
             return GameAudio.MakeClip("ambient", data);
+        }
+
+        // T18: downtown bed — the same brown noise but busier: a soft mid
+        // hum (traffic drone) plus occasional bright honks spaced on a
+        // seeded schedule. Colder and more awake than residential.
+        static AudioClip BakeAmbientDowntown()
+        {
+            var data = new float[Rate * 2];
+            var rng = new System.Random(888);
+            float prev = 0f, honkAt = 0.9f;
+            for (int i = 0; i < data.Length; i++)
+            {
+                float t = i / (float)Rate;
+                float n = (float)(rng.NextDouble() * 2.0 - 1.0);
+                prev = prev * 0.90f + n * 0.10f;
+                float mod = 0.75f + 0.25f * Mathf.Sin(2f * Mathf.PI * 0.09f * t + 1.3f);
+                float honk = 0f;
+                if (t >= honkAt && t < honkAt + 0.12f)
+                    honk = Mathf.Sin(2f * Mathf.PI * 392f * t) * 0.10f;
+                else if (t >= honkAt + 0.12f) { honkAt = honkAt + 0.7f + (float)rng.NextDouble() * 2.4f; }
+                data[i] = prev * 1.2f * mod + honk;
+            }
+            return GameAudio.MakeClip("ambient-downtown", data);
+        }
+
+        // T18: industrial bed — same noise family, but low and rhythmic:
+        // a slow factory throb plus a metallic clank layer, darker overall.
+        static AudioClip BakeAmbientIndustrial()
+        {
+            var data = new float[Rate * 2];
+            var rng = new System.Random(999);
+            float prev = 0f;
+            for (int i = 0; i < data.Length; i++)
+            {
+                float t = i / (float)Rate;
+                float n = (float)(rng.NextDouble() * 2.0 - 1.0);
+                prev = prev * 0.96f + n * 0.04f;
+                float throb = Mathf.Sin(2f * Mathf.PI * 48f * t)
+                               * (0.6f + 0.4f * Mathf.Sin(2f * Mathf.PI * 0.4f * t)) * 0.18f;
+                float clank = (t % 2.1f) < 0.02f ? (float)(rng.NextDouble() * 2.0 - 1.0) * 0.22f : 0f;
+                data[i] = prev * 1.5f + throb + clank;
+            }
+            return GameAudio.MakeClip("ambient-industrial", data);
         }
 
         // 80ms transient: concrete = brighter scuff, grass = heavy low-pass

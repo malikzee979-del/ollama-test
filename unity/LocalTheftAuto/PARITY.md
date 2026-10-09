@@ -35,10 +35,17 @@ gets a row here, and every row gets a decision. Maintained per
 | --- | --- | --- | --- |
 | Missions | 7: delivery, circuit, steal, ram, rampage, escort/VIP | 4: delivery, rampage, steal, gang war | Circuit/Ram/Escort → Unity (Phase 2 A6); Gang War needs gangs — deferred |
 | Gangs + vendetta | ❌ | ✅ | Optional → JS; **deferred** (fights non-lethal tone, week of work) |
-| Wanted escalation | roadblocks ≥3★, heli ≥4★, SWAT ≥5★, hideouts | roadblocks only | Heli/SWAT/hideouts → Unity (Phase 2 A5) |
-| Weather/rain (grip, fog) | ❌ | ✅ | → JS (Phase 2 A1) |
+| Wanted escalation | roadblocks ≥3★, heli ≥4★, SWAT ≥5★, hideouts | ✅ T9: SWAT cruisers at 5★ (220 HP, +30 top speed, alternate spawns, ticker warning) — roadblocks already landed | Heli + hideouts → Unity |
+| Weather/rain (grip, fog) | ❌ | ✅ — T10 added Fog as a third state: rotation cycle (rain 70% / fog 30%), tighter fog distance in `UpdateWorldFX`, flat 0.9 grip, traffic cruise ×0.75, debug-pin value 2 | ✅ (Unity-only; fog optional when porting) |
+| Body types | 3 (sedan/hatch/van via seed%3) | ✅ T11: 4th body — motorbike (seed branch `(seed & 7) == 4`, ~12.5% of traffic; `Cfg.Body*` 4th entries + `BodyRadius`; narrow mesh in `BuildBike`; per-body push radius; dedicated engine clip) | → JS (bike optional when porting) |
+| Witness-based crime reporting | seed only (`panicNear`, steal witness) | ✅ T5: full system — crimes only raise stars when a living ped witnesses them; the reporter can be stopped during the 2.5s report window | Unity ahead here; JS port optional |
+| Pistons/audio architecture | n/a | T12: restart path uses a real `Audio3D.Reset()` (reflection hack removed) | parity (Unity-internal cleanup) |
+| Ped variety | uniform | ✅ T13: hashed outfit palettes (already landed) + hashed height tiers (0.9–1.12) + panic cower pose (arms up, hunch, eased in/out) | → JS optional |
+| Chase audio | none | ✅ T14: procedural tension bed (drone + tick + dissonant second), volume ramps with Wanted 1–5★, pitch bend up, muted during BUSTED/WASTED | → JS optional |
+| Mission signage | none | ✅ T15: mission-blue signboard meshes beside the active delivery/steal marker, hidden with it | → JS optional |
+| District ambience | one city bed | ✅ T18: per-district baked loops (residential brown noise / downtown hum+honks / industrial throb+clank) crossfaded on boundary cross | → JS optional |
 | Districts (Downtown/Residential/Industrial) | ❌ | ✅ | → JS (Phase 2 A2, draw-only) |
-| Economy | garage save, paint shop, gas, mart | ❌ | → Unity (Phase 3A, merges PLAN-gameplay-next Stage 3) |
+| Economy | garage save, paint shop, gas, mart | ✅ T8 gas drive-in repair (2s hold / −150); T16 garage world trigger (2s hold on a garage tile saves body/paint/health into `lta_save_json`, owned car respawns near start via ring rejection-sampling) | Paint shop + mart → Unity (Phase 3A remains) |
 | Achievements/stats/settings menu | ✅ | settings ✅ — Stage 1 **landed** (`SettingsStore`, pause-menu settings page); stats/achievements ❌ | stats/achievements → Unity |
 | Rival score `#s=` URL hash | ✅ | ❌ (PlayerPrefs high score) | Low priority |
 | Style combos/pops | ✅ | ❌ | → Unity (Phase 2 A3) |

@@ -28,11 +28,17 @@ namespace LocalTheftAuto
 
         // pause menu — one dim panel, three mutually-exclusive pages
         GameObject pausePanel;
-        GameObject pageMain, pageSettings, pageControls;
+        GameObject pageMain, pageSettings, pageControls, pageDebug;
         Text volumeText;
 
-        enum MenuPage { Main, Settings, Controls }
+        enum MenuPage { Main, Settings, Controls, Debug }
         MenuPage page = MenuPage.Main;
+
+        // T3: live readouts for the debug page's tuner rows (keyed by row
+        // name; refreshed in RefreshTunRows whenever the page is shown or
+        // a stepper fires so no row ever shows a stale value)
+        readonly System.Collections.Generic.Dictionary<string, Text> tunRowValues =
+            new System.Collections.Generic.Dictionary<string, Text>();
 
         Texture2D mmTex;
         Color32[] mmBase;
@@ -316,8 +322,7 @@ namespace LocalTheftAuto
             pageMain = MakePage(p, "page-main");
             pageSettings = MakePage(p, "page-settings");
             pageControls = MakePage(p, "page-controls");
-
-            // main page
+            pageDebug = MakePage(p, "page-debug");
             MakeMenuButton(pageMain.transform, "resume", "RESUME", 60, () => SetPaused(false));
             MakeMenuButton(pageMain.transform, "settings", "SETTINGS", 6, () => ShowPage(MenuPage.Settings));
             MakeMenuButton(pageMain.transform, "controls", "CONTROLS", -48, () => ShowPage(MenuPage.Controls));
@@ -358,6 +363,12 @@ namespace LocalTheftAuto
             var ctlPad = UiText("ctl-pad", pageControls.transform, GamepadHint, 12, new Color(1, 1, 1, 0.45f), TextAnchor.MiddleCenter);
             PlaceCenter(ctlPad, 180 - ControlLines.Length * 26 - 8);
             MakeMenuButton(pageControls.transform, "back-controls", "BACK", -110, () => ShowPage(MenuPage.Main));
+
+            // debug page (T3) — live steppers for the Tun* multipliers +
+            // GodMode toggle, so the runtime-tuning fields declared for
+            // this have their write-side. Menu entry appears on the main
+            // page only under debug builds (see ApplyPage/debug button).
+            BuildDebugPage(p);
 
             pausePanel.SetActive(false);
             ApplyPage();
@@ -435,6 +446,8 @@ namespace LocalTheftAuto
             pageMain.SetActive(page == MenuPage.Main);
             pageSettings.SetActive(page == MenuPage.Settings);
             pageControls.SetActive(page == MenuPage.Controls);
+            pageDebug.SetActive(page == MenuPage.Debug);
+            if (page == MenuPage.Debug) RefreshTunRows();
         }
 
         void StepVolume(float delta)
@@ -450,6 +463,192 @@ namespace LocalTheftAuto
         {
             if (volumeText != null)
                 volumeText.text = Mathf.RoundToInt(SettingsStore.MasterVolume * 100f) + "%";
+        }
+
+        /* -------------------------------------------------------- T3: debug page */
+
+        // The write-side for the Tun*/GodMode fields declared in GameState
+        // (their read sites already live in PlayerSys.Step / LawStep /
+        // WeatherStep / UpdateWorldFX). Same −/+ stepper pattern as master
+        // volume — 10% steps, live readout, no new widget types. Values are
+        // clamped defensively: TunCopSpawnInterval lives on the same
+        // hats, so keep every multiplier in [0.1, 3].
+        const float TunStep = 0.1f;
+
+        GameObject debugButton;   // main-page entry, active only in debug builds
+        int sbSpawnBody = -1;     // T19: last body type the spawn button made
+
+        void BuildDebugPage(Transform p)
+        {
+            var label = UiText("debug-title", pageDebug.transform, "DEBUG TUNING", 26, Amber, TextAnchor.MiddleCenter);
+            label.fontStyle = FontStyle.Bold;
+            PlaceCenter(label, 200);
+
+            TunRow(pageDebug.transform, "tun-accel", "accel", () => data.State.TunAccel,
+                   v => data.State.TunAccel = Mathf.Clamp(v, 0.1f, 3f));
+            TunRow(pageDebug.transform, "tun-top", "top speed", () => data.State.TunTopSpeed,
+                   v => data.State.TunTopSpeed = Mathf.Clamp(v, 0.1f, 3f));
+            TunRow(pageDebug.transform, "tun-grip", "grip", () => data.State.TunGrip,
+                   v => data.State.TunGrip = Mathf.Clamp(v, 0.1f, 3f));
+            TunRow(pageDebug.transform, "tun-cop", "cop spawn", () => data.State.TunCopSpawnInterval,
+                   v => data.State.TunCopSpawnInterval = Mathf.Clamp(v, 0.1f, 3f));
+
+            // day-of-time override: 10% steps over [0,1], walked from −1 by
+            // first pressing − (−1 sentinel = follow the clock)
+            TunRow(pageDebug.transform, "tun-day", "day amount", () =>
+                       data.State.TunDayOverride < 0f ? -1f : Mathf.Round(data.State.TunDayOverride * 10f) / 10f,
+                   v => data.State.TunDayOverride = Mathf.Clamp(v, -1f, 1f));
+
+            // weather pin: cycles Auto → Clear → Rain → Fog → Auto (values −1/0/1/2)
+            MakeDebugButton(pageDebug.transform, "tun-weather", "weather: auto", 24, () =>
+            {
+                var s = data.State;
+                s.TunForceWeather = (s.TunForceWeather + 2) % 4 - 1;   // −1 → 0 → 1 → 2 → −1
+                RefreshTunRows();
+            });
+
+            MakeDebugButton(pageDebug.transform, "tun-god", "god mode: off", -46, () =>
+            {
+                data.State.GodMode = !data.State.GodMode;
+                RefreshTunRows();
+            });
+
+            // ---- T19: sandbox cheats ----
+            // teleport to the nearest garage tile — instant, works on foot
+            // or in a car (an in-car teleport brings the car along)
+            MakeDebugButton(pageDebug.transform, "sb-tp-garage", "TP: nearest garage", -146, () =>
+            {
+                var s = data.State;
+                var p = data.Player;
+                int baseTx = Mathf.FloorToInt(p.X / Cfg.Tile);
+                int baseTy = Mathf.FloorToInt(p.Y / Cfg.Tile);
+                for (int ring = 1; ring <= 24; ring++)
+                for (int bx = -ring; bx <= ring; bx++)
+                for (int by = -ring; by <= ring; by++)
+                {
+                    if (Mathf.Max(Mathf.Abs(bx), Mathf.Abs(by)) != ring) continue;   // ring sweep: nearest first
+                    int tx = (baseTx / Cfg.BlockTiles + bx) * Cfg.BlockTiles + 3;
+                    int ty = (baseTy / Cfg.BlockTiles + by) * Cfg.BlockTiles + 3;
+                    if (!CityMap.IsGarage(tx, ty) && !CityMap.IsGarage(tx, ty - Cfg.BlockTiles + 9)
+                        && !CityMap.IsGarage(tx - Cfg.BlockTiles + 3, ty)) continue;
+                    // land on the ROAD beside the garage corner, not inside it
+                    var c = CityMap.TileCenter(new Vector2Int(tx, ty));
+                    float nx = c.x + Cfg.Tile / 2f, ny = c.y;
+                    if (p.InCar != null) { p.InCar.X = nx; p.InCar.Y = ny; p.InCar.Speed = 0f; p.InCar.Vx = p.InCar.Vy = 0f; }
+                    p.X = nx; p.Y = ny;
+                    s.Say("Teleported to the nearest garage.");
+                    return;
+                }
+                s.Say("No garage found nearby.");
+            });
+
+            // time skip: jump the game clock +6h so day/night and the
+            // weather clock can be inspected without waiting
+            MakeDebugButton(pageDebug.transform, "sb-skip-time", "SKIP +6 HOURS", -192, () =>
+            {
+                var s = data.State;
+                s.Time += Cfg.DayLength / 4.0;
+                s.NextWeatherAt = s.Time + 5.0;   // let weather re-roll soon after the jump
+                s.Say("Time skips. The light changes.");
+            });
+
+            // spawn one drivable car of the next body type right beside the
+            // player (parked) — cycles sedan → hatch → van → bike → sedan
+            MakeDebugButton(pageDebug.transform, "sb-spawn", "SPAWN NEXT BODY", -238, () =>
+            {
+                var s = data.State;
+                sbSpawnBody = (sbSpawnBody + 1) % 4;
+                CarEnt c = Systems.MakeCar(
+                    data.Player.X + 40f, data.Player.Y + 40f, 0, true);
+                for (int i = 0; i < 64 && c.BodyType != sbSpawnBody; i++)
+                    c.Seed = UnityEngine.Random.Range(0, int.MaxValue);
+                c.Color = Cfg.CarPaints[UnityEngine.Random.Range(0, Cfg.CarPaints.Length)];
+                data.Cars.Add(c);
+                s.Say("Spawned a " + new[] { "sedan", "hatch", "van", "bike" }[sbSpawnBody] + ". Parked, yours to take.");
+            });
+
+            MakeDebugButton(pageDebug.transform, "reset-tun", "RESET NEUTRAL", -284, () =>
+            {
+                var s = data.State;
+                s.TunAccel = s.TunTopSpeed = s.TunGrip = 1f;
+                s.TunCopSpawnInterval = 1.5f;
+                s.TunForceWeather = -1;
+                s.TunDayOverride = -1f;
+                s.GodMode = false;
+                RefreshTunRows();
+            });
+            MakeDebugButton(pageDebug.transform, "back-debug", "BACK", -330, () => ShowPage(MenuPage.Main));
+
+            // main-page entry. In non-debug builds the button exists but
+            // stays inactive — cheap to keep, honest to hide.
+            debugButton = MakeMenuButton(pageMain.transform, "debug", "DEBUG", -210, () => ShowPage(MenuPage.Debug)).gameObject;
+        }
+
+        // one label + −/+ steppers + live readout row; the value getter is a
+        // Func so RefreshTunRows can re-read the live state each refresh
+        void TunRow(Transform parent, string name, string what, System.Func<float> get, System.Action<float> set)
+        {
+            var label = UiText(name + "-label", parent, what, 14, new Color(1, 1, 1, 0.6f), TextAnchor.MiddleLeft);
+            var lr = Rt(label.gameObject);
+            lr.anchorMin = new Vector2(0.5f, 0.5f); lr.anchorMax = new Vector2(0.5f, 0.5f);
+            lr.anchoredPosition = new Vector2(-160, 130 - tunRowValues.Count * 36);
+            lr.sizeDelta = new Vector2(140, 20);
+
+            var minusB = MakeDebugButton(parent, name + "-down", "\u2212", 130 - tunRowValues.Count * 36, () =>
+            {
+                set(Mathf.Round((get() - TunStep) * 100f) / 100f);
+                RefreshTunRows();
+            });
+            Rt(minusB.gameObject).sizeDelta = new Vector2(36, 32);
+            Rt(minusB.gameObject).anchoredPosition = new Vector2(-30, 130 - tunRowValues.Count * 36);
+
+            var val = UiText(name + "-val", parent, "", 15, Cfg.Hex("#e9edf4"), TextAnchor.MiddleCenter);
+            var vr = Rt(val.gameObject);
+            vr.anchorMin = new Vector2(0.5f, 0.5f); vr.anchorMax = new Vector2(0.5f, 0.5f);
+            vr.anchoredPosition = new Vector2(50, 130 - tunRowValues.Count * 36);
+            vr.sizeDelta = new Vector2(70, 20);
+            tunRowValues[name] = val;
+
+            var plusB = MakeDebugButton(parent, name + "-up", "+", 130 - tunRowValues.Count * 36, () =>
+            {
+                set(Mathf.Round((get() + TunStep) * 100f) / 100f);
+                RefreshTunRows();
+            });
+            Rt(plusB.gameObject).sizeDelta = new Vector2(36, 32);
+            Rt(plusB.gameObject).anchoredPosition = new Vector2(140, 130 - tunRowValues.Count * 36);
+        }
+
+        // same Amber widget as MakeMenuButton but wider (the labels are long)
+        // and with the readout refresh folded in: a stepper press and its
+        // readout update land in the same frame, no observer plumbing.
+        Button MakeDebugButton(Transform parent, string name, string label, float y, System.Action onClick)
+        {
+            var btn = MakeMenuButton(parent, name, label, y, onClick);
+            Rt(btn.gameObject).sizeDelta = new Vector2(260, 36);
+            var t = Rt(btn.gameObject).GetComponentInChildren<Text>();
+            t.fontSize = 14;
+            return btn;
+        }
+
+        void RefreshTunRows()
+        {
+            if (pageDebug == null) return;
+            var s = data.State;
+            SetRow("tun-accel", s.TunAccel == 1f ? "1.0 (neutral)" : s.TunAccel.ToString("0.00"));
+            SetRow("tun-top", s.TunTopSpeed == 1f ? "1.0 (neutral)" : s.TunTopSpeed.ToString("0.00"));
+            SetRow("tun-grip", s.TunGrip == 1f ? "1.0 (neutral)" : s.TunGrip.ToString("0.00"));
+            SetRow("tun-cop", s.TunCopSpawnInterval.ToString("0.0") + "s");
+            SetRow("tun-day", s.TunDayOverride < 0f ? "auto" : Mathf.Round(s.TunDayOverride * 10f) / 10f + "");
+            SetRow("tun-weather", s.TunForceWeather < 0 ? "weather: auto"
+                        : (s.TunForceWeather == 0 ? "weather: clear"
+                          : s.TunForceWeather == 1 ? "weather: rain" : "weather: fog"));
+            SetRow("tun-god", s.GodMode ? "god mode: ON" : "god mode: off");
+        }
+
+        void SetRow(string key, string text)
+        {
+            Text t;
+            if (tunRowValues.TryGetValue(key, out t) && t != null) t.text = text;
         }
 
         static void QuitToDesktop()

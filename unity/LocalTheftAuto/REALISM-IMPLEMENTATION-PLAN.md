@@ -1,5 +1,10 @@
 # Local Theft Auto — Realism Implementation Plan
 
+> **SUPERSEDED (2026-10-03).** This plan's phases landed — sky shader, lit
+> rendering, 3D spatial audio, and the sim harnesses listed at the bottom all
+> exist in the current tree. Treat it as history, not backlog; the live plan
+> is [PLAN-gameplay-next.md](PLAN-gameplay-next.md).
+
 Scope: all four pillars the user asked for — **visual/lighting, driving physics,
 world/AI, audio** — pushed toward a heavier, more cinematic look even at some
 cost to performance and to the current "retro homage" vibe.
