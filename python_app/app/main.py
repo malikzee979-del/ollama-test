@@ -11,7 +11,7 @@ from nicegui import app, ui
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import config
-from .api import router as api_router
+from .api import logging_metrics_middleware, router as api_router
 from .auth_store import store as auth_store
 
 # Page routes that don't require authentication.
@@ -46,6 +46,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(AuthMiddleware)
+# Request logging + /api/metrics counters (TODO 3.1.1: previously defined in
+# api.py but never registered, so /api/metrics always served an empty
+# snapshot and no X-Request-Id was ever emitted). Added after AuthMiddleware
+# so it wraps every route the auth gate handles too.
+app.add_middleware(logging_metrics_middleware)
 app.include_router(api_router)
 
 # Import page modules for their @ui.page side effects.

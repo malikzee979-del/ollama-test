@@ -21,6 +21,7 @@ module.exports = [
       'scratchpad/**', // throwaway debug/demo scripts
       'public/fonts/**',
       'marketing/**', // plain-script browser game/site code, no build step (verified via node --check)
+      'marketing-next/**', // separate Next.js project with its own tooling (build output not ours to lint)
       '.pixis/**', // agent scratch space and one-off scripts
       'unity/**', // Unity C# project; JS here is vendored tooling
     ],
