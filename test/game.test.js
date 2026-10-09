@@ -127,7 +127,19 @@ function loadGame(options) {
   global.requestAnimationFrame = (cb) => { rafCb = cb; };
   global.performance = { now: () => Date.now() };
 
-  eval(code);
+  // The game file is a browser-only IIFE with no exports; when a test needs
+  // to reach one production helper directly (below: the phase-1 sight
+  // model), opts.expose splices a tiny side-door line into the eval'd
+  // source before the file's FINAL closer (inner IIFEs also end with
+  // `})();`, so String.replace's first-match behavior lands wrong).
+  // Nothing else about the file under test changes.
+  let src = code;
+  if (opts.expose) {
+    const cut = code.lastIndexOf('})();');
+    assert.ok(cut !== -1, 'game source ends with an IIFE closer to splice at');
+    src = code.slice(0, cut) + opts.expose + '\n' + code.slice(cut);
+  }
+  eval(src);
 
   const touch = {};
   TOUCH_KEYS.forEach((k, i) => { touch[k] = touchBtns[i]; });
@@ -405,4 +417,79 @@ test('customizer (A4): old-shape lta-settings merges with the new skin/shirt key
   assert.equal(freshSaved.skin, 1, 'fresh save: skin cycles from the default 0');
   assert.equal(freshSaved.shirt, 0, 'fresh save: shirt stays at the default 0');
   assert.ok(!JSON.stringify(freshSaved).includes('NaN'), 'no NaN in the merged settings');
+});
+
+/* Realism phase 1 — the sight model. game.js has no exports, so the probe
+   below goes through the harness's expose side-door (direct helper calls,
+   exactly what production runs) and, for the end-to-end half, through what
+   the game prints on the canvas — following this file's "assert on the
+   observable output, not internal state" convention. */
+test('sight model (phase 1): cone + line-of-sight gate witnesses, and a spotted carjack raises wanted via the ticker', () => {
+  // Direct probes against citizenCanSee/blockedByBuilding through the
+  // side-door. A ped facing +x (dir 0) sees the player ahead but not
+  // behind, and a building wall between them blocks even an in-cone target.
+  loadGame({
+    expose: "window.__SEE = { canSee: citizenCanSee, blocked: blockedByBuilding, cone: SEE_CONE, TILE: TILE, BLDG: BLDG, typeAtPx: typeAtPx };"
+  });
+
+  const SEE = global.window.__SEE;
+  assert.equal(SEE.cone, 0.6, 'witness cone is the documented ~120° total (±0.6 rad half)');
+  const ped = { x: 0, y: 0, dir: 0, dead: false };
+  assert.equal(SEE.canSee(ped, 100, 30, 160), true, 'in-cone target ahead is seen');
+  assert.equal(SEE.canSee(ped, 60, 90, 160), false, 'target outside the ~120° cone is not seen');
+  assert.equal(SEE.canSee(ped, -100, 5, 160), false, 'target behind the ped is not seen');
+  assert.equal(SEE.canSee(ped, 100, 30, 99), false, 'target beyond the radius is not seen');
+
+  // Line-of-sight: scan the hash-derived city grid for a walkable (SIDE)
+  // tile whose east neighbor is BLDG, then assert the ray from its tile
+  // center across that wall tile is blocked.
+  const T = SEE.TILE;
+  let wallPair = null;
+  outer:
+  for (let ty = 4; ty < 100 && !wallPair; ty += 1) {
+    for (let tx = 4; tx < 100; tx += 1) {
+      const a = SEE.typeAtPx((tx + 0.5) * T, (ty + 0.5) * T);
+      if (a !== SEE.BLDG && SEE.typeAtPx((tx + 1.5) * T, (ty + 0.5) * T) === SEE.BLDG) {
+        wallPair = { tx, ty };
+        break outer;
+      }
+    }
+  }
+  assert.ok(wallPair, 'city layout contains a walkable tile hard against a building wall');
+  const wp = wallPair;
+  const wallPed = { x: (wp.tx + 0.5) * T, y: (wp.ty + 0.5) * T, dir: 0, dead: false };
+  assert.equal(SEE.blocked(wallPed.x, wallPed.y, (wp.tx + 2.5) * T, wallPed.y), true, 'a building tile between ped and player blocks sight');
+  assert.equal(SEE.canSee(wallPed, (wp.tx + 2.5) * T, wallPed.y, 4 * T), false, 'in-cone target behind a wall is NOT seen');
+
+  // End-to-end: plant a ped a step ahead of the player at spawn (facing
+  // them), then punch — deterministic crime, deterministic witness — and
+  // confirm the phase-1 ticker line reached the canvas log (assertions stay
+  // on observable output, the harness convention).
+  const run = loadGame({
+    expose: "window.__SETUP = { peds: peds, spawn: spawn, panicNearF: panicNear };"
+  });
+  run.pump(5);
+  const setup = global.window.__SETUP;
+  run.listeners['gameStart:click']();
+  run.pump(2);
+  // Two peds planted dead-ahead of the player's spawn facing (+x): a
+  // victim within punch reach (20px) and a facing witness just beyond it
+  // (60px, dir 2 → facing -x, i.e. straight at the player). Planted and
+  // punched in the same synchronous batch — pedStep must not run between
+  // the plant and the punch, or a ped wanders out of the cone. Also
+  // guards the phase-1 regression found while writing this test: the
+  // witness say() must be the last writer of the single-slot ticker
+  // (unlockAch's "Achievement unlocked" line used to win and erase it).
+  const mkPed = (off) => ({
+    x: setup.spawn.x + off, y: setup.spawn.y, dir: 2, speed: 26,
+    panic: 0, gawk: 0, shirt: "#c8553d", skin: 0, dead: false, timer: 0, phase: 0
+  });
+  const victim = mkPed(20);
+  const witness = mkPed(60);
+  setup.peds.push(victim);
+  setup.peds.push(witness);
+  run.listeners['window:keydown']({ key: 'f', preventDefault() {} }); // player faces +x at spawn, victim dead ahead
+  run.listeners['window:keyup']({ key: 'f' });
+  run.pump(10);
+  assert.ok(run.textLog.some((s) => s.startsWith('Someone saw you!')), 'witnessed punch raised wanted through the phase-1 ticker line');
 });
