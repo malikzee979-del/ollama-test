@@ -283,8 +283,23 @@ app.post('/api/auth/login', authRateLimiter, (req, res) => {
   if (typeof username !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: 'Missing "username" or "password".' });
   }
+  // Per-username+IP lockout (see auth.js): the per-IP limiter above can't
+  // see a single-username spray from many IPs, or a many-username spray
+  // that stays under the per-IP cap. Check before touching the DB so a
+  // locked pair burns no scrypt work either.
+  const lock = auth.loginLockRemaining(username, req.ip || req.socket.remoteAddress);
+  if (lock) {
+    res.setHeader('Retry-After', String(lock.retryAfterSec));
+    return res.status(429).json({ error: 'Too many failed attempts for this account. Please wait and try again.' });
+  }
   const user = auth.verifyUser(username, password);
-  if (!user) return res.status(401).json({ error: 'Invalid username or password.' });
+  if (!user) {
+    auth.recordLoginFailure(username, req.ip || req.socket.remoteAddress);
+    return res.status(401).json({ error: 'Invalid username or password.' });
+  }
+  // Successful login clears the pair's history so spaced-out failures
+  // never accumulate into a lock.
+  auth.clearLoginFailures(username, req.ip || req.socket.remoteAddress);
   const { token, expiresAt } = auth.createSession(user.id);
   setSessionCookie(res, token, expiresAt);
   res.json({ user });
@@ -381,7 +396,17 @@ app.post('/api/show', async (req, res) => {
 // straight through to the browser as they arrive.
 // Shape check shared by /api/sessions/:id PATCH and /api/chat: every
 // message must carry a string "role" and a string "content".
-const isValidMessage = (m) => m && typeof m === 'object' && typeof m.role === 'string' && typeof m.content === 'string';
+// A chat message is valid if role/content are strings and — when present —
+// `images` is an array of non-empty base64 strings (Ollama's vision input
+// shape; empty strings would be forwarded upstream and rejected by Ollama
+// with an opaque error, so they're rejected here with a clear one).
+const isValidImages = (imgs) => Array.isArray(imgs) && imgs.length > 0
+  && imgs.every((i) => typeof i === 'string' && i.length > 0);
+const isValidMessage = (m) => m
+  && typeof m === 'object'
+  && typeof m.role === 'string'
+  && typeof m.content === 'string'
+  && (m.images === undefined || isValidImages(m.images));
 
 // Race a memory retrieval promise against MEMORY_TIMEOUT_MS. Neither
 // embeddings.embed nor qdrant.searchByVector accepts an abort signal, so
@@ -653,6 +678,28 @@ app.delete('/api/models/:name', modelDeleteRateLimiter, async (req, res) => {
 app.get('/api/sessions', (req, res) => {
   try {
     res.json({ sessions: db.listSessions(req.user.id) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Export the user's own data: every session including full messages, as a
+// JSON download (TODO 5.3 — the "rescue months of history without copying
+// raw files" path). Response headers make the browser download it instead
+// of rendering it, under a stable filename. Per-user scoped like every
+// other /api/* route, so an account only ever gets back what it owns.
+app.get('/api/export', (req, res) => {
+  try {
+    const sessions = db.exportSessions(req.user.id);
+    const payload = JSON.stringify(
+      { exportedAt: new Date().toISOString(), app: 'ollama-chat', sessions },
+      null,
+      2
+    );
+    const filename = `ollama-chat-export-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(payload);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

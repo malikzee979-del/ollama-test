@@ -171,6 +171,77 @@ function resetPassword(username, newPassword) {
   return toPublicUser(row);
 }
 
+// --- login lockout (per username + IP) -------------------------------------
+//
+// server.js rate-limits /api/auth/login per client IP, but that leaves two
+// holes: an attacker can spray one username from many IPs, or spray many
+// usernames from one IP that never trips the per-IP cap. This adds the
+// missing dimension: failed logins are counted per (username, ip) pair, and
+// once one pair accumulates LOCKOUT_MAX_FAILURES within the window, further
+// attempts for that pair are refused until the window drains.
+//
+// Keyed on username+IP rather than username alone on purpose — a global
+// username lock would hand anyone a one-liner DoS: type a victim's name in
+// five times from any IP and their account cannot log in at all for the
+// window. Per-pair still stops the spraying patterns above while leaving
+// legitimate distributed use untouched.
+//
+// Same in-memory fixed-window shape as server.js's rateLimiter (Map of
+// timestamp arrays, opportunistic sweep) — resets on restart, which is
+// acceptable for the same reasons documented there.
+
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const LOCKOUT_MAX_FAILURES = 5;
+
+const failedLoginAttempts = new Map(); // `${usernameLower}|${ip}` -> [timestamps]
+let lastLockoutSweep = 0;
+
+function lockoutKey(username, ip) {
+  // Case-fold the username: credentials are compared case-sensitively by
+  // SQLite here, but a spray usually isn't case-consistent, and folding
+  // keeps one username from getting five windows' worth of attempts by
+  // alternating "Alice" and "alice".
+  return `${String(username).toLowerCase()}|${ip || 'unknown'}`;
+}
+
+function sweepFailedLogins(now) {
+  if (now - lastLockoutSweep < LOCKOUT_WINDOW_MS) return;
+  lastLockoutSweep = now;
+  for (const [key, stamps] of failedLoginAttempts) {
+    const alive = stamps.filter((t) => now - t < LOCKOUT_WINDOW_MS);
+    if (alive.length > 0) failedLoginAttempts.set(key, alive);
+    else failedLoginAttempts.delete(key);
+  }
+}
+
+// Returns null while the pair is under the failure threshold, or an object
+// carrying the seconds until the lock drains (for the Retry-After header).
+function loginLockRemaining(username, ip) {
+  const key = lockoutKey(username, ip);
+  const now = Date.now();
+  sweepFailedLogins(now);
+  const stamps = (failedLoginAttempts.get(key) || []).filter((t) => now - t < LOCKOUT_WINDOW_MS);
+  if (stamps.length < LOCKOUT_MAX_FAILURES) return null;
+  return { retryAfterSec: Math.ceil((LOCKOUT_WINDOW_MS - (now - stamps[0])) / 1000) };
+}
+
+// Count one failed attempt. Old stamps are dropped inline so a long-running
+// attacker cycling above the threshold can't accumulate a stale trailing
+// window (the sweeper would also handle it, but only once per window).
+function recordLoginFailure(username, ip) {
+  const key = lockoutKey(username, ip);
+  const now = Date.now();
+  const stamps = (failedLoginAttempts.get(key) || []).filter((t) => now - t < LOCKOUT_WINDOW_MS);
+  stamps.push(now);
+  failedLoginAttempts.set(key, stamps);
+}
+
+// A successful login clears the pair entirely: five spaced-out failures a
+// week apart must never add up to a lock.
+function clearLoginFailures(username, ip) {
+  failedLoginAttempts.delete(lockoutKey(username, ip));
+}
+
 module.exports = {
   DB_FILE,
   SESSION_COOKIE,
@@ -182,17 +253,22 @@ module.exports = {
   getUserBySessionToken,
   deleteSession,
   pruneExpiredSessions,
+  // login lockout (see the section comment above)
+  LOCKOUT_WINDOW_MS,
+  LOCKOUT_MAX_FAILURES,
+  loginLockRemaining,
+  recordLoginFailure,
+  clearLoginFailures,
 };
 
-// --- CLI: local password reset ------------------------------------------
+// --- CLI: local password reset + auth.db backup --------------------------
 //
 //   node auth.js --reset-password <username>
+//   node auth.js --backup-authdb [dest-dir]
 //
 // Run on the host, so it can only ever be invoked by someone with shell
-// access — no network, no SMTP. Prompts for the new password twice (input
-// muted), validates it with the same rules as signup, and revokes the
-// user's existing sessions. Only runs when this file is executed directly,
-// never when it's required by server.js or the tests.
+// access — no network, no SMTP. Only runs when this file is executed
+// directly, never when it's required by server.js or the tests.
 if (require.main === module) {
   const readline = require('readline');
 
@@ -214,11 +290,42 @@ if (require.main === module) {
     });
   }
 
+  // Copies the live auth.db to a timestamped file. SQLite's own backup
+  // would be the gold standard, but node:sqlite's DatabaseSync doesn't
+  // expose it — a plain copy is safe here because this server writes
+  // sessions rarely (login/signup/prune), and the copy is taken at an
+  // instant: worst case a half-landed session insert is lost, never users.
+  function backupAuthDb(destDir) {
+    if (!fs.existsSync(DB_FILE)) {
+      throw new Error(`No auth database found at ${DB_FILE}.`);
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const target = path.join(destDir, `auth-${stamp}.db`);
+    fs.copyFileSync(DB_FILE, target);
+    return target;
+  }
+
   (async () => {
     const args = process.argv.slice(2);
+
+    if (args[0] === '--backup-authdb') {
+      // Default destination: data/backups next to the live db.
+      const destDir = args[1] || path.join(path.dirname(DB_FILE), 'backups');
+      try {
+        fs.mkdirSync(destDir, { recursive: true });
+        const target = backupAuthDb(destDir);
+        console.log(`Backed up ${DB_FILE} -> ${target}`);
+        process.exit(0);
+      } catch (err) {
+        console.error(err.message);
+        process.exit(1);
+      }
+    }
+
     const username = args[0] === '--reset-password' ? args[1] : args[0];
     if (!username || args[0] !== '--reset-password') {
       console.error('Usage: node auth.js --reset-password <username>');
+      console.error('       node auth.js --backup-authdb [dest-dir]');
       process.exit(1);
     }
 

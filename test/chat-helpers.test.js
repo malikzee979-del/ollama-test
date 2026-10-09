@@ -22,10 +22,18 @@ test('attachmentError rejects a file once the per-message cap is reached', () =>
   assert.match(err, /at most 3 files/);
 });
 
-test('attachmentError rejects unsupported extensions', () => {
-  const err = helpers.attachmentError('photo.png', 10, 0);
-  assert.match(err, /not a supported file type/);
+test('attachmentError rejects unsupported extensions but accepts images', () => {
+  // .png used to be unsupported (text-only pipeline); it now takes the
+  // image path, so the "unsupported" case needs a genuinely unknown type.
+  assert.match(helpers.attachmentError('prog.exe', 10, 0), /not a supported file type/);
   assert.match(helpers.attachmentError('noext', 10, 0), /not a supported file type/);
+  assert.equal(helpers.attachmentError('photo.png', 10, 0), null, 'images are allowed now');
+  assert.equal(helpers.attachmentError('PIC.JPG', 10, 0), null, 'image extension match is case-insensitive');
+});
+
+test('attachmentError rejects images over the 4MB image cap (not the 200KB text cap)', () => {
+  assert.match(helpers.attachmentError('photo.png', helpers.IMAGE_MAX_SIZE + 1, 0), /exceeds the 4MB limit per image/);
+  assert.equal(helpers.attachmentError('photo.png', helpers.IMAGE_MAX_SIZE, 0), null);
 });
 
 test('attachmentError rejects files over the 200KB cap, with sizes formatted', () => {
@@ -47,6 +55,33 @@ test('formatBytes renders human-readable units', () => {
 });
 
 // --- message shaping --------------------------------------------------------
+
+test('buildOllamaMessages routes image attachments to Ollama\'s images array, not a text block', () => {
+  const chatMessages = [
+    { role: 'user', content: 'what is in this picture?', attachments: [
+      { name: 'photo.png', content: 'QUJD', size: 3, type: 'image' },
+      { name: 'notes.txt', content: 'hello', size: 5 },
+    ] },
+  ];
+  const msgs = helpers.buildOllamaMessages('', chatMessages);
+  assert.equal(msgs.length, 1);
+  assert.deepEqual(msgs[0].images, ['QUJD'], 'images must ride on the message as base64');
+  assert.match(msgs[0].content, /Attached file: notes\.txt/, 'text attachments still fold into content');
+  assert.doesNotMatch(msgs[0].content, /QUJD/, 'image bytes must not leak into the text content');
+
+  // Image-only message: content stays the raw text, images still attached.
+  const imgsOnly = helpers.buildOllamaMessages('', [
+    { role: 'user', content: 'see attached', attachments: [
+      { name: 'photo.png', content: 'QUJD', size: 3 },
+    ] },
+  ]);
+  assert.equal(imgsOnly[0].content, 'see attached');
+  assert.deepEqual(imgsOnly[0].images, ['QUJD']);
+
+  // No images field when there are none — exactly the pre-image shape.
+  const plain = helpers.buildOllamaMessages('', [{ role: 'user', content: 'hi' }]);
+  assert.equal('images' in plain[0], false);
+});
 
 test('buildOllamaMessages puts a trimmed system prompt first, then the messages', () => {
   const msgs = helpers.buildOllamaMessages('  Be concise.  ', [
@@ -140,4 +175,38 @@ test('exportFilename slugs the title and stamps the date', () => {
   const name = helpers.exportFilename({ title: '  Hello, World! --  ' }, 'md');
   assert.match(name, /^hello-world-\d{4}-\d{2}-\d{2}\.md$/);
   assert.match(helpers.exportFilename({ title: '' }, 'json'), /^chat-\d{4}-\d{2}-\d{2}\.json$/);
+});
+
+// --- markdown rendering (extracted from app.js) ------------------------------
+
+test('escapeHtml escapes the HTML-significant characters', () => {
+  assert.equal(helpers.escapeHtml('<img src=x>&"q"'), '&lt;img src=x&gt;&amp;&quot;q&quot;');
+});
+
+test('renderMarkdown renders inline formatting and fenced code blocks', () => {
+  const out = helpers.renderMarkdown('# not a heading\n\nplain **bold** and `code`');
+  assert.equal(out.includes('<strong>bold</strong>'), true);
+  assert.equal(out.includes('<code>code</code>'), true);
+  assert.equal(out.includes('# not'), true, 'headings are not supported — literal pass-through');
+  assert.match(out, /<p>/);
+});
+
+test('renderMarkdown escapes HTML so injected markup cannot execute', () => {
+  const out = helpers.renderMarkdown('hello <img src=x onerror=alert(1)> world');
+  assert.equal(out.includes('<img'), false, 'raw <img> must never survive');
+  assert.equal(out.includes('&lt;img'), true);
+});
+
+test('renderMarkdown renders a fenced block with language and copy button, escaping its contents', () => {
+  const out = helpers.renderMarkdown('```js\nconst a = "<b>leak</b>";\n```');
+  assert.match(out, /data-lang="js"/);
+  assert.match(out, /copy-btn/);
+  assert.equal(out.includes('<b>leak</b>'), false, 'code contents must be escaped');
+  assert.equal(out.includes('&lt;b&gt;leak&lt;/b&gt;'), true);
+});
+
+test('renderMarkdown keeps multi-paragraph text separated with <br> inside paragraphs', () => {
+  const out = helpers.renderMarkdown('para one\nline two\n\npara two');
+  assert.match(out, /<p>para one<br>line two<\/p>/);
+  assert.match(out, /<p>para two<\/p>/);
 });

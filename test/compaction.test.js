@@ -219,3 +219,37 @@ test('compactMessages never summarizes a trailing memory-only conversation', asy
   const result = await compactMessages({ messages, summarize: async () => 'should not run' });
   assert.equal(result, messages);
 });
+
+// --- vision passthrough -------------------------------------------------------
+
+// Image attachments ride on messages as Ollama's `images: []` (base64).
+// Once a conversation with images crosses a compaction threshold, the
+// summary replacement would silently drop them if compactMessages rebuilt
+// messages instead of spreading them — this pins the contract.
+
+test('compactMessages passes images through untouched on kept recent messages', async () => {
+  const imgMsg = {
+    role: 'user',
+    content: 'what is this?',
+    images: ['QUJDREVG'],
+  };
+  const messages = Array.from({ length: 45 }, (_, i) => ({
+    role: 'user',
+    content: `filler turn ${i} with enough words to be worth summarizing later`,
+  })).concat([imgMsg]);
+
+  const out = await compactMessages({
+    messages,
+    keepRecent: 2,
+    summarize: async (toSummarize) => `summarized ${toSummarize.length} turns`,
+  });
+
+  assert.notEqual(out, messages, 'compaction must have triggered');
+  assert.equal(out[0].role, 'system');
+  const keptImages = out.filter((m) => Array.isArray(m.images));
+  assert.equal(keptImages.length, 1, 'exactly the original image message keeps images');
+  assert.deepEqual(keptImages[0].images, ['QUJDREVG'], 'images array must be byte-identical');
+  // And estimateTokens must never have been confused by base64 weight —
+  // the trigger counts content chars only (documented heuristic gap);
+  // estimateTokens is covered separately above.
+});

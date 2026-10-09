@@ -217,6 +217,53 @@ test('POST /api/chat forwards the request and streams ndjson chunks back verbati
 
 // --- compaction surfaced to the client (X-Compacted) ----------------------
 
+// --- vision (images) passthrough -------------------------------------------
+
+test('POST /api/chat forwards a message\'s images array to Ollama untouched', async () => {
+  const before = fake.state.chatRequests.length;
+  const res = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      model: 'llava',
+      messages: [
+        { role: 'system', content: 'be terse' },
+        { role: 'user', content: 'what is in this picture?', images: ['QUJDREVG', 'MTIzNDU2'] },
+      ],
+    }),
+  });
+  await res.text();
+  assert.equal(res.status, 200);
+
+  const forwarded = fake.state.chatRequests[fake.state.chatRequests.length - 1].body;
+  assert.equal(fake.state.chatRequests.length, before + 1, 'sanity: the chat proxy saw this request');
+  assert.deepEqual(forwarded.messages[1].images, ['QUJDREVG', 'MTIzNDU2'],
+    'the images array must reach Ollama byte-identical');
+  assert.equal(forwarded.messages[0].images, undefined, 'other messages must not gain an images field');
+});
+
+test('POST /api/chat rejects bad images payloads with a clear 400', async () => {
+  const cases = [
+    { images: 'not-an-array' },
+    { images: [] },
+    { images: [''] },
+    { images: [42] },
+  ];
+  for (const images of cases) {
+    const res = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        model: 'llava',
+        messages: [{ role: 'user', content: 'hi', ...images }],
+      }),
+    });
+    assert.equal(res.status, 400, `images payload ${JSON.stringify(images)} must be rejected`);
+    const body = await res.json();
+    assert.match(body.error, /role.*content/i);
+  }
+});
+
 test('POST /api/chat does not set X-Compacted for a short conversation', async () => {
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',

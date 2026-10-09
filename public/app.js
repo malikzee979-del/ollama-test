@@ -43,6 +43,8 @@
     ATTACHMENT_MAX_COUNT,
     formatBytes,
     attachmentError,
+    isImageAttachment,
+    imageMimeType,
     buildOllamaMessages,
     estimateChatTokens,
     formatTokens,
@@ -50,6 +52,7 @@
     chatToMarkdown,
     chatToJson,
     exportFilename,
+    renderMarkdown,
   } = window.ChatHelpers;
 
   // ---------- Elements ----------
@@ -96,6 +99,7 @@
     numCtx: document.getElementById('numCtx'),
     useMemory: document.getElementById('useMemory'),
     deleteAllBtn: document.getElementById('deleteAllBtn'),
+    downloadDataBtn: document.getElementById('downloadDataBtn'),
     installedModelsList: document.getElementById('installedModelsList'),
     pullModelInput: document.getElementById('pullModelInput'),
     pullModelBtn: document.getElementById('pullModelBtn'),
@@ -419,50 +423,6 @@
       item.appendChild(del);
       el.chatList.appendChild(item);
     }
-  }
-
-  function escapeHtml(str) {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  // Minimal, dependency-free markdown: fenced code blocks, inline code,
-  // bold/italic, and paragraph breaks.
-  function renderMarkdown(text) {
-    const blocks = [];
-    let working = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-      const idx = blocks.length;
-      blocks.push({ lang, code });
-      return `\u0000CODE${idx}\u0000`;
-    });
-
-    working = escapeHtml(working);
-
-    working = working
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
-
-    const paragraphs = working.split(/\n{2,}/).map((p) => {
-      // NUL (\u0000) is used as a placeholder for code blocks after HTML
-      // escaping — it can never appear in the escaped text itself.
-      // eslint-disable-next-line no-control-regex
-      if (/^\u0000CODE\d+\u0000$/.test(p.trim())) return p.trim();
-      return `<p>${p.replace(/\n/g, '<br>')}</p>`;
-    });
-    working = paragraphs.join('\n');
-
-    // eslint-disable-next-line no-control-regex -- see note above.
-    working = working.replace(/\u0000CODE(\d+)\u0000/g, (_, idx) => {
-      const { lang, code } = blocks[Number(idx)];
-      const escaped = escapeHtml(code).replace(/\n$/, '');
-      return `<div class="pre-wrap"><pre><code data-lang="${escapeHtml(lang)}">${escaped}</code></pre><button class="copy-btn" type="button">Copy</button></div>`;
-    });
-
-    return working;
   }
 
   function renderMessages() {
@@ -880,6 +840,18 @@
   function buildAttachmentChip(att, { removable }) {
     const chip = document.createElement('div');
     chip.className = 'attachment-chip';
+    const isImage = isImageAttachment(att.name);
+    if (isImage) chip.classList.add('image-chip');
+
+    if (isImage) {
+      // Thumbnail decode straight from the stored base64 — same payload
+      // whole app ships around, no second source of truth.
+      const thumb = document.createElement('img');
+      thumb.className = 'thumb';
+      thumb.src = `data:${imageMimeType(att.name)};base64,${att.content}`;
+      thumb.alt = '';
+      chip.appendChild(thumb);
+    }
 
     const name = document.createElement('span');
     name.className = 'name';
@@ -939,8 +911,17 @@
         continue;
       }
       try {
-        const content = await file.text();
-        pendingAttachments.push({ name: file.name, content, size: file.size });
+        if (isImageAttachment(file.name)) {
+          // Images: base64 (bare, no data: prefix) — that is the payload
+          // Ollama's `images: []` expects, and it rides along in the
+          // persisted message verbatim.
+          const dataUrl = await readAsDataURL(file);
+          const content = String(dataUrl).slice(String(dataUrl).indexOf(',') + 1);
+          pendingAttachments.push({ name: file.name, content, size: file.size, type: 'image' });
+        } else {
+          const content = await file.text();
+          pendingAttachments.push({ name: file.name, content, size: file.size });
+        }
       } catch (err) {
         showError(`Failed to read "${file.name}": ${err.message}`);
       }
@@ -953,6 +934,18 @@
     handleFileSelect(el.fileInput.files);
     el.fileInput.value = '';
   });
+
+  // FileReader wrapped in a promise — the async/await shape handleFileSelect
+  // needs; file.text() can't be used because images must base64, not decode
+  // as text.
+  function readAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error(`Could not read "${file.name}".`));
+      reader.readAsDataURL(file);
+    });
+  }
 
   // ---------- Sending messages ----------
   function autoResizeTextarea() {
@@ -1408,6 +1401,35 @@
   });
   el.temperature.addEventListener('input', () => (el.tempValue.textContent = el.temperature.value));
   el.topP.addEventListener('input', () => (el.topPValue.textContent = el.topP.value));
+  // ---------- Download my data (Settings modal) ----------
+  // Fetches the auth-scoped full export (GET /api/export) and hands it to
+  // the browser as a JSON download. Uses the raw fetch rather than
+  // apiRequest because the response is the file itself, not a JSON envelope
+  // with an error field.
+  el.downloadDataBtn?.addEventListener('click', async () => {
+    el.downloadDataBtn.disabled = true;
+    try {
+      const res = await fetch('/api/export');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      const text = await res.text();
+      // Parse once to fail fast on a broken response, then re-stringify to
+      // rebuild the exact payload the server stamped (Content-Disposition
+      // already carries the filename; the blob path needs one anyway).
+      JSON.parse(text);
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      downloadBlob(match ? match[1] : 'ollama-chat-export.json', 'application/json', text);
+    } catch (err) {
+      showError(`Export failed: ${err.message}`);
+    } finally {
+      el.downloadDataBtn.disabled = false;
+    }
+  });
+
+  // ---------- Danger zone ----------
   el.deleteAllBtn.addEventListener('click', async () => {
     if (!confirm('Delete all chats? This cannot be undone.')) return;
     const ids = chats.map((c) => c.id);

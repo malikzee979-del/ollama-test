@@ -145,3 +145,57 @@ test('resetPassword validates input and rejects unknown usernames', () => {
   assert.throws(() => auth.resetPassword('resetme', 'short'), /Password/);
   assert.throws(() => auth.resetPassword('bad name!', 'password123'), /Username/);
 });
+
+// --- login lockout (per username + IP) --------------------------------------
+//
+// In-memory, so each test below must only rely on the pairs it created —
+// and clean up after itself, since auth.js is required once for the whole
+// file and the failure map persists across tests.
+
+test('loginLockRemaining is null until LOCKOUT_MAX_FAILURES failures accumulate', () => {
+  for (let i = 0; i < auth.LOCKOUT_MAX_FAILURES - 1; i++) {
+    auth.recordLoginFailure('lockout-under', '10.0.0.1');
+    assert.equal(auth.loginLockRemaining('lockout-under', '10.0.0.1'), null, 'under threshold must not lock');
+  }
+  auth.recordLoginFailure('lockout-under', '10.0.0.1');
+  assert.ok(auth.loginLockRemaining('lockout-under', '10.0.0.1'), 'at threshold must lock');
+  auth.clearLoginFailures('lockout-under', '10.0.0.1');
+  assert.equal(auth.loginLockRemaining('lockout-under', '10.0.0.1'), null, 'clear must lift the lock');
+});
+
+test('lockout is scoped per (username, ip) pair, not per username or per ip', () => {
+  for (let i = 0; i < auth.LOCKOUT_MAX_FAILURES; i++) {
+    auth.recordLoginFailure('lockout-pair', '10.0.0.2');
+  }
+  // Same username, different IP: not locked.
+  assert.equal(auth.loginLockRemaining('lockout-pair', '10.0.0.3'), null);
+  // Same IP, different username: not locked.
+  assert.equal(auth.loginLockRemaining('lockout-knave', '10.0.0.2'), null);
+  // The pair itself: locked.
+  assert.ok(auth.loginLockRemaining('lockout-pair', '10.0.0.2'));
+  auth.clearLoginFailures('lockout-pair', '10.0.0.2');
+});
+
+test('lockout is case-insensitive on the username', () => {
+  for (let i = 0; i < auth.LOCKOUT_MAX_FAILURES; i++) {
+    auth.recordLoginFailure('LockOut-Case', '10.0.0.4');
+  }
+  assert.ok(auth.loginLockRemaining('lockout-case', '10.0.0.4'), 'case-folded pair must be locked');
+  auth.clearLoginFailures('LOCKOUT-CASE', '10.0.0.4');
+  assert.equal(auth.loginLockRemaining('lockout-case', '10.0.0.4'), null, 'clear must be case-insensitive too');
+});
+
+test('locked pairs report a positive Retry-After, and old failures are dropped', () => {
+  for (let i = 0; i < auth.LOCKOUT_MAX_FAILURES; i++) {
+    auth.recordLoginFailure('lockout-rtry', '10.0.0.5');
+  }
+  const lock = auth.loginLockRemaining('lockout-rtry', '10.0.0.5');
+  assert.ok(lock);
+  assert.ok(lock.retryAfterSec > 0 && lock.retryAfterSec <= auth.LOCKOUT_WINDOW_MS / 1000);
+  assert.equal(
+    auth.loginLockRemaining('lockout-rtry', '10.99.99.99'),
+    null,
+    'a fresh IP against the same username must not be locked'
+  );
+  auth.clearLoginFailures('lockout-rtry', '10.0.0.5');
+});

@@ -350,3 +350,55 @@ test('GET /api/sessions/search rejects a missing query and yields nothing for ot
   const asId = await fetch(`${baseUrl}/api/sessions/search`, { headers: { Cookie: sessionCookie } });
   assert.equal(asId.status, 400);
 });
+
+// --- GET /api/metrics (server-level) -----------------------------------------
+//
+// metrics.test.js covers the aggregation math in isolation; this asserts the
+// actual HTTP surface: auth-gated, and the JSON shape matches what the
+// frontend (and any local Dashboard consumer) expects.
+
+test('GET /api/metrics requires a session', async () => {
+  const anon = await fetch(`${baseUrl}/api/metrics`);
+  assert.equal(anon.status, 401);
+  assert.deepEqual(await anon.json(), { error: 'Authentication required.' });
+});
+
+test('GET /api/metrics returns the documented snapshot shape for a logged-in user', async () => {
+  const res = await fetch(`${baseUrl}/api/metrics`, { headers: { Cookie: sessionCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  for (const key of ['totalRequests', 'upstreamErrorCount', 'uptimeSeconds', 'memoryUsage', 'routes']) {
+    assert.ok(key in body, `snapshot must include ${key}`);
+  }
+  // The middleware records a request when its response finishes, so a
+  // response's own snapshot never contains its own hit — but the anonymous
+  // 401 probe in the previous test already registered the route key.
+  assert.ok('GET /api/metrics' in body.routes, 'the metrics route itself must appear in the route table');
+  const entry = body.routes['GET /api/metrics'];
+  assert.ok(entry.count >= 1);
+  assert.ok(entry.statusCounts['401'] >= 1, 'the unauthenticated probe must be counted with its real status');
+  assert.equal(entry.count, Object.values(entry.statusCounts).reduce((a, b) => a + b, 0), 'statusCounts must partition the count');
+  for (const l of ['avgMs', 'minMs', 'maxMs']) assert.ok(typeof entry[l] === 'number');
+});
+
+// --- GET /api/export (data export, TODO 5.3) ---------------------------------
+
+test('GET /api/export requires a session', async () => {
+  const anon = await fetch(`${baseUrl}/api/export`);
+  assert.equal(anon.status, 401);
+});
+
+test('GET /api/export downloads the signed-in user\'s full sessions as JSON', async () => {
+  const res = await fetch(`${baseUrl}/api/export`, { headers: { Cookie: sessionCookie } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') || '', /application\/json/);
+  assert.match(res.headers.get('content-disposition') || '', /attachment; filename="ollama-chat-export-\d{4}-\d{2}-\d{2}\.json"/);
+
+  const body = await res.json();
+  assert.equal(body.app, 'ollama-chat');
+  assert.ok(typeof body.exportedAt === 'string');
+  assert.ok(Array.isArray(body.sessions));
+  const own = body.sessions.find((s) => s.id === sessionId);
+  assert.ok(own, 'the export must include this user\'s session');
+  assert.ok(Array.isArray(own.messages), 'export carries full messages, unlike the sidebar summaries');
+});

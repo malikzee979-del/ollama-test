@@ -189,3 +189,20 @@ test('searchSessions returns [] for a blank query and sorts newest-updated first
   const results = db.searchSessions(7, 'alpha');
   assert.deepEqual(results.map((s) => s.id), [first.id, second.id]);
 });
+
+// --- exportSessions (data export backing, TODO 5.3) --------------------------
+
+test("exportSessions returns full own sessions and never another user's", () => {
+  const a = db.createSession('user-a', 'a-one');
+  db.updateSession(a.id, 'user-a', { appendMessages: [{ role: 'user', content: 'export me' }] });
+  db.createSession('user-b', 'b-secret');
+
+  const out = db.exportSessions('user-a');
+  const ids = out.map((s) => s.id);
+  assert.ok(ids.includes(a.id));
+  assert.equal(ids.includes('b-secret') || out.some((s) => s.title === 'b-secret'), false,
+    'another user session must never appear in the export');
+
+  const full = db.getSession(a.id, 'user-a');
+  assert.deepStrictEqual(out[0], full, 'export carries the full session object, not a summary');
+});

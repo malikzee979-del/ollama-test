@@ -102,8 +102,8 @@
           <div id="pendingAttachments" class="pending-attachments"></div>
           <div class="composer-row">
             <input type="file" id="fileInput" class="visually-hidden" multiple
-              accept=".txt,.md,.markdown,.json,.csv,.tsv,.log,.js,.ts,.py,.html,.css,.yaml,.yml,.xml,.sh" />
-            <button type="button" id="attachBtn" class="icon-btn" title="Attach text file(s)" aria-label="Attach text file(s)">
+              accept=".txt,.md,.markdown,.json,.csv,.tsv,.log,.js,.ts,.py,.html,.css,.yaml,.yml,.xml,.sh,image/png,image/jpeg,image/webp,image/gif" />
+            <button type="button" id="attachBtn" class="icon-btn" title="Attach file(s) — text or images" aria-label="Attach file(s) — text or images">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
             </button>
             <label class="visually-hidden" for="promptInput">Message your local model</label>
@@ -188,6 +188,14 @@
               <div class="pull-progress-bar"><div id="pullProgressFill" class="pull-progress-fill"></div></div>
               <small id="pullProgressText"></small>
             </div>
+          </div>
+        </div>
+
+        <div class="modal-section">
+          <h3 class="modal-section-title">Data</h3>
+          <div class="field-row">
+            <button id="downloadDataBtn" class="btn btn-ghost">Download my data</button>
+            <small>Exports every chat (full message history) as a single JSON file.</small>
           </div>
         </div>
 

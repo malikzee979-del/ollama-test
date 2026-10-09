@@ -1,24 +1,27 @@
 /* ==========================================================================
    Ollama Chat — design system
    --------------------------------------------------------------------------
-   Subject: a personal chat assistant running on the user's own hardware.
-   The visual language follows the mainstream conversational-assistant idiom
-   (ChatGPT-style): a quiet neutral canvas, a soft sidebar, one centered
-   transcript column, user turns as rounded bubbles, assistant turns as
-   plain prose, and a pill-shaped composer floating at the bottom.
+   Subject: a personal tool for talking to models running on the user's own
+   hardware. The visual language is "warm workbench": ink on paper, the amber
+   of an active machine light as the only accent, and IBM Plex Mono used for
+   everything that identifies the machine's side of the conversation (the
+   assistant, eyebrows, meta text) — a nod to the terminal Ollama runs in.
 
    Stance:
-     · Shape  — rounded. 8–12px for controls, 16–28px for containers,
-                pills/circles for icon buttons. One vocabulary everywhere.
-     · Depth  — flat surfaces separated by tint, not borders. The only
+     · Shape  — lightly rounded. 6–10px for controls, 14–16px for containers.
+                A rounded-but-not-pill vocabulary: this is a tool, not a toy.
+     · Depth  — flat surfaces separated by tint and hairlines. The only
                 shadow is the soft ambient one under the settings modal.
-     · Type   — IBM Plex Sans for everything UI and prose (bundled locally,
+     · Type   — IBM Plex Sans carries prose and controls (bundled locally,
                 honoring the app's "nothing leaves your machine" promise);
-                IBM Plex Mono reserved for code content.
-     · Color  — near-monochrome. Neutral grays carry the whole interface;
-                the one scarce accent is the amber brand mark (and the
-                model-pull progress fill). Semantic green/red are reserved
-                for connection state and destructive actions.
+                IBM Plex Mono adds the machine voice: accent mono eyebrows,
+                section titles, labels on assistant effort rows, the terminal
+                register in auth meta lines.
+     · Color  — ink on warm paper. The accent is machine amber (the same hue
+                as the favicon), used on the primary action, the brand mark,
+                and progress fills — scarce everywhere else. Semantic
+                green/red are reserved for connection state and destructive
+                actions.
      · Motion — quiet: hover tints, one breathing status dot, one blinking
                 stream caret. All of it disabled under prefers-reduced-motion.
    ========================================================================== */
@@ -62,37 +65,37 @@
 }
 
 :root {
-  /* Light is the default ground: white canvas, faint-gray sidebar — the
-     classic conversational-assistant arrangement. */
-  --bg: #ffffff;
-  --bg-sidebar: #f9f9f9;
-  --bg-surface: #f4f4f4;              /* composer card, user bubble, inputs */
-  --bg-code: #f9f9f9;
-  --bg-hover: rgba(0, 0, 0, 0.05);
-  --bg-active: rgba(0, 0, 0, 0.08);
-  --border: rgba(0, 0, 0, 0.10);
-  --border-strong: rgba(0, 0, 0, 0.22);
-  --text: #0d0d0d;
-  --text-dim: #5d5d5d;
-  --text-faint: #8f8f8f;
-  --btn-primary-bg: #0d0d0d;
-  --btn-primary-fg: #ffffff;
-  --btn-primary-bg-hover: #2c2c2c;
-  --brand: #c77800;                   /* amber brand mark, AA on white */
-  --danger: #b91c1c;
-  --danger-hover: #991b1b;
-  --danger-soft: rgba(185, 28, 28, 0.07);
-  --danger-line: rgba(185, 28, 28, 0.35);
-  --success: #16a34a;
-  --ring: #0d0d0d;
-  --scrim: rgba(0, 0, 0, 0.5);
-  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.18);
+  /* Light is the default ground: warm paper, a deeper parchment sidebar —
+     ink on paper, the way a well-kept workbench reads. */
+  --bg: #faf7f2;
+  --bg-sidebar: #f2ede4;
+  --bg-surface: #ece5d8;              /* composer card, user bubble, inputs */
+  --bg-code: #f4f0e9;
+  --bg-hover: rgba(45, 33, 14, 0.06);
+  --bg-active: rgba(45, 33, 14, 0.10);
+  --border: rgba(45, 33, 14, 0.14);
+  --border-strong: rgba(45, 33, 14, 0.30);
+  --text: #201404;
+  --text-dim: #6b5a44;
+  --text-faint: #9b8b74;
+  --btn-primary-bg: #b36b00;
+  --btn-primary-fg: #fffaf2;
+  --btn-primary-bg-hover: #cc7c00;
+  --brand: #b36b00;                   /* machine amber, the same hue as the favicon */
+  --danger: #b3302c;
+  --danger-hover: #92201d;
+  --danger-soft: rgba(179, 48, 44, 0.07);
+  --danger-line: rgba(179, 48, 44, 0.35);
+  --success: #1c7c46;
+  --ring: #201404;
+  --scrim: rgba(32, 20, 4, 0.5);
+  --shadow-modal: 0 12px 40px rgba(32, 20, 4, 0.2);
 
-  /* Shape — one rounded vocabulary, applied everywhere. */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
+  /* Shape — a lightly rounded vocabulary: tools, not toys. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
   --radius-pill: 9999px;
 
   /* Type — sans is the interface face; mono is reserved for code. */
@@ -118,31 +121,33 @@
   font-size: 16px;
 }
 
-/* Dark theme: the assistant's familiar charcoal ground. */
+/* Dark theme: the same workbench at night — a tinted charcoal ground that
+   leans toward the palette (never pure #000), soft ink-white text, and the
+   amber turned up so it keeps its heat against the darker ground. */
 :root[data-theme="dark"] {
-  --bg: #212121;
-  --bg-sidebar: #171717;
-  --bg-surface: #2f2f2f;
-  --bg-code: #0d0d0d;
-  --bg-hover: rgba(255, 255, 255, 0.06);
-  --bg-active: rgba(255, 255, 255, 0.10);
-  --border: rgba(255, 255, 255, 0.10);
-  --border-strong: rgba(255, 255, 255, 0.24);
-  --text: #ececec;
-  --text-dim: #b4b4b4;
-  --text-faint: #8e8e8e;
-  --btn-primary-bg: #ececec;
-  --btn-primary-fg: #212121;
-  --btn-primary-bg-hover: #ffffff;
+  --bg: #17130c;
+  --bg-sidebar: #100d08;
+  --bg-surface: #241e14;
+  --bg-code: #0f0c07;
+  --bg-hover: rgba(255, 226, 170, 0.06);
+  --bg-active: rgba(255, 226, 170, 0.11);
+  --border: rgba(255, 226, 170, 0.11);
+  --border-strong: rgba(255, 226, 170, 0.26);
+  --text: #f4ecdd;
+  --text-dim: #c2b49c;
+  --text-faint: #95856d;
+  --btn-primary-bg: #f0a72c;
+  --btn-primary-fg: #1c1305;
+  --btn-primary-bg-hover: #ffb946;
   --brand: #f0a72c;
-  --danger: #ff8080;
-  --danger-hover: #ffa3a3;
-  --danger-soft: rgba(255, 128, 128, 0.10);
-  --danger-line: rgba(255, 128, 128, 0.38);
-  --success: #3dd68c;
-  --ring: #ececec;
-  --scrim: rgba(0, 0, 0, 0.66);
-  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --danger: #ff8a83;
+  --danger-hover: #ffa89f;
+  --danger-soft: rgba(255, 138, 131, 0.10);
+  --danger-line: rgba(255, 138, 131, 0.38);
+  --success: #4cc98a;
+  --ring: #f4ecdd;
+  --scrim: rgba(10, 7, 3, 0.66);
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.55);
 }
 
 * { box-sizing: border-box; }
@@ -199,6 +204,7 @@ svg.icon {
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
+  border-right: 1px solid var(--border);
   transition: margin-left var(--duration-base) var(--ease-standard);
 }
 #app.sidebar-collapsed .sidebar {
@@ -208,6 +214,8 @@ svg.icon {
 .sidebar-header {
   padding: var(--sp-3);
 }
+
+/* New chat keeps the amber primary — the one hot control on the panel. */
 .sidebar-header .btn-primary {
   background: transparent;
   color: var(--text);
@@ -426,7 +434,7 @@ svg.icon {
 .model-picker select {
   appearance: none;
   -webkit-appearance: none;
-  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238e8e8e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239b8b74' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
   color: var(--text);
   border: none;
   border-radius: var(--radius-sm);
@@ -496,15 +504,15 @@ svg.icon {
   align-items: center;
   gap: var(--sp-4);
 }
-.empty-state .brand-mark svg { width: 36px; height: 36px; }
+.empty-state .brand-mark svg { width: 44px; height: 44px; }
 .empty-state h1 {
   margin: 0;
   color: var(--text);
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: clamp(24px, 3.4vw, 30px);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: clamp(21px, 3vw, 26px);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
 }
 .empty-state p {
   margin: 0;
@@ -723,13 +731,16 @@ svg.icon {
   width: 100%;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 28px;
+  border-radius: var(--radius-lg);
   padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
   display: flex;
   flex-direction: column;
-  transition: border-color var(--duration-fast) var(--ease-standard);
+  transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
 }
-.composer:focus-within { border-color: var(--border-strong); }
+.composer:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(179, 107, 0, 0.12);
+}
 
 .composer-row {
   display: flex;
@@ -762,10 +773,18 @@ svg.icon {
   justify-content: center;
   gap: 6px;
   font-size: 12px;
+  font-family: var(--font-mono);
   color: var(--text-faint);
   padding: 10px 0 0;
 }
-.composer-hint .key { font-weight: 500; color: var(--text-dim); }
+.composer-hint .key {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-weight: 500;
+  color: var(--text-dim);
+}
 .composer-hint .sep { color: var(--border-strong); }
 
 /* Approximate context usage for the open chat (chars/4 ≈ tokens, the same
@@ -917,6 +936,16 @@ svg.icon {
   cursor: pointer;
   flex-shrink: 0;
   transition: color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard);
+}
+/* Image chips carry a small decoded thumbnail instead of a name-only chip. */
+.attachment-chip.image-chip { padding-left: 4px; }
+.attachment-chip .thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: calc(var(--radius-md) - 2px);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg);
 }
 .attachment-chip .remove svg.icon { width: 11px; height: 11px; }
 .attachment-chip .remove:hover { color: var(--danger); background: var(--danger-soft); }
@@ -1182,10 +1211,13 @@ svg.icon {
   z-index: 1;
 }
 .auth-card {
-  width: 360px;
+  width: 380px;
   max-width: 100%;
   background: var(--bg);
-  border: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6) var(--sp-5);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
 }
@@ -1204,10 +1236,10 @@ svg.icon {
 .auth-mark svg { width: 36px; height: 36px; }
 .auth-title {
   margin: 0;
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: 26px;
-  letter-spacing: -0.02em;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: -0.01em;
   color: var(--text);
   text-align: center;
 }
@@ -1226,7 +1258,9 @@ svg.icon {
   margin: 0;
   padding: var(--sp-2) 0 0;
   list-style: none;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
   color: var(--text-faint);
 }
 .auth-meta li { display: flex; align-items: center; gap: 6px; }

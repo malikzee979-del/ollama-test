@@ -178,6 +178,17 @@ function deleteSession(id, userId) {
   return true;
 }
 
+// Full export for the user's own data: every session *including* messages,
+// newest-updated first, ready to be served as JSON (GET /api/export). This
+// is the "months of history can only be rescued by copying raw files"
+// escape hatch (TODO 5.3) — unlike listSessions, which returns summaries
+// for the sidebar, this hands back everything the user owns.
+function exportSessions(userId) {
+  return Object.values(sessions)
+    .filter((s) => s.userId === userId)
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+}
+
 module.exports = {
   DATA_FILE,
   listSessions,
@@ -186,4 +197,5 @@ module.exports = {
   createSession,
   updateSession,
   deleteSession,
+  exportSessions,
 };
