@@ -257,6 +257,24 @@ features, privacy posture, the three apps, and setup steps). Open
 `index.html` directly in a browser or serve the directory with any static
 file server.
 
+### Next.js edition of the marketing site
+
+[`marketing-next/`](marketing-next/) rebuilds the same site on
+**Next.js 16 + React 19** (App Router) as a **static export** — the build
+output in `out/` is plain files, deployable to any static host. Shared
+nav/footer/background become React components, the Three.js hero city is
+a client island, the canvas game page mounts the original `game.js` /
+`assets.js` **byte-for-byte** from `public/` (React never owns the game's
+DOM), and the local-Ollama chat widget is a full port as a client
+component. CI builds it on every push (`.github/workflows/ci.yml`,
+`marketing-next` job).
+
+```bash
+cd marketing-next && npm install
+npm run dev     # dev server on :8900
+npm run build   # static export into out/
+```
+
 ## Unity port — Local Theft Auto
 
 [`unity/LocalTheftAuto/`](unity/LocalTheftAuto/) ports the canvas game
@@ -301,9 +319,16 @@ the app right after signing up.
   password twice (input muted), validates it with the same rules as signup,
   and revokes all of that user's existing sessions. This is deliberately a
   local/CLI flow rather than an emailed-token one: the app is local-first
-  and has no SMTP dependency.
+  and has no SMTP dependency. The same CLI also backs up the account
+  database: `node auth.js --backup-authdb [dest-dir]` copies `data/auth.db`
+  to a timestamped file (default destination `data/backups/`).
 - `/api/auth/login` and `/api/auth/signup` are rate-limited per IP (10
-  requests / 5 minutes) to slow down brute-forcing or signup spam, as are
+  requests / 5 minutes) to slow down brute-forcing or signup spam — and
+  failed logins are additionally locked out per *username + IP* pair
+  (5 failures / 15 minutes), which closes the gap a per-IP cap alone
+  leaves: spraying one username from many IPs. A successful login clears
+  the pair's history, so spaced-out failures never accumulate into a lock.
+  As are
   `/api/pull` (5 / 15 minutes), `DELETE /api/models/:name` (10 / 5
   minutes), and `/api/memory/index` (20 / 5 minutes) — pulling a model is
   the most expensive action the app can trigger on the host, and deleting
@@ -480,15 +505,23 @@ COMPACTION_TIMEOUT_MS=30000  # how long the summarization call may take before i
 
 ## Attachments
 
-The composer's 📎 button lets you attach plain-text files to a message —
-supported extensions: `.txt .md .markdown .json .csv .tsv .log .js .ts .py
-.html .css .yaml .yml .xml .sh`. Files are read entirely client-side and
-folded into the prompt sent to Ollama as fenced `[Attached file: name]` blocks
-appended to your message content; nothing is uploaded to a server route.
-Limits: 200KB per file, 3 files per message. Attachments are stored
-alongside the rest of the chat in the server-side session store
-(`/api/sessions/*`), so they persist across reloads like normal messages.
-Binary formats (PDF, DOCX, images, etc.) aren't supported.
+The composer's 📎 button lets you attach files to a message. Two kinds are
+supported:
+
+- **Plain-text files** — supported extensions: `.txt .md .markdown .json .csv
+  .tsv .log .js .ts .py .html .css .yaml .yml .xml .sh`. Read entirely
+  client-side and folded into the prompt as fenced `[Attached file: name]`
+  blocks appended to your message content.
+- **Images** — `.png .jpg .jpeg .webp .gif`, up to 4MB each. Read client-side
+  as base64 and sent to Ollama's per-message `images: []` array, which is the
+  input shape vision-capable models (llava, llama3.2-vision, qwen2.5vl, …)
+  read. Show one image in a message and non-vision models will just ignore
+  the pixels; text models keep working normally.
+
+Both kinds: nothing is uploaded to a server route, limits are 3 files per
+message, and attachments are stored alongside the rest of the chat in the
+server-side session store (`/api/sessions/*`), so they persist across reloads
+like normal messages. Other binary formats (PDF, DOCX, …) aren't supported.
 
 ## Model management
 

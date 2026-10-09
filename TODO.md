@@ -1,8 +1,8 @@
 # Project TODO — Ollama Chat
 
-The **single living backlog** for this repo. Health re-verified **2026-10-03**
-against a live run of `npm test`, `npm run lint`, `npm audit`, `git ls-files`
-and `git check-ignore -v`. The satellite read-through behind Phase 3 is still
+The **single living backlog** for this repo. Health re-verified **2026-10-07**
+against a live run of `npm test`, `npm run lint`, `npm audit --omit=dev`,
+`npm audit --json` and `git status`. The satellite read-through behind Phase 3 is still
 the **2026-09-14** one and was not re-audited.
 
 Supersedes the 2026-09-12 revision of this file, and **absorbs
@@ -19,15 +19,15 @@ below. `PLAN.md` remains the feature roadmap and is referenced from Phase 4.
 
 If you add work, add it here. Don't start a fourth plan.
 
-## Health today (verified 2026-09-21)
+## Health today (verified 2026-10-07)
 
 | Check | Result |
 | --- | --- |
-| `npm test` | **Green** — 84/84 (`node --test`, 9 suites, ~2.5s) |
+| `npm test` | **Green** — 120/120 (`node --test`, 12 suites, ~2s) |
 | `npm run lint` | **Green** — exit 0, 0 problems (fixed 2026-09-09 in `eslint.config.js`) |
-| `npm audit --omit=dev` | **0 vulnerabilities** — cleared 2026-10-03 via an `undici: ^7.29.1` override (the `@qdrant/js-client-rest@1.19.0` pin dragged in a vulnerable undici); `qs` already resolves to 6.16.0. See 2.1 |
-| `npm audit` (incl. dev) | **17 total — 1 critical, 13 high, 3 moderate.** Critical is `tar <=7.5.20`; the dev-side set is all in the `electron-builder 25.1.8` tree. See 2.6 |
-| CI | **Active** — `.github/workflows/ci.yml` (Node 22, npm ci, lint, test), committed 2026-10-03. Audit gate still to add (1.2) |
+| `npm audit --omit=dev` | **0 vulnerabilities** — cleared 2026-10-03 via an `undici: ^7.29.1` override (the `@qdrant/js-client-rest@1.19.0` pin dragged in a vulnerable undici); re-cleared 2026-10-07 via `npm audit fix` after a critical `proxy-addr` advisory (IP spoofing, GHSA-jqcg-44mw-7w3h) regressed in; `proxy-addr` now at 2.0.8. See 2.1 |
+| `npm audit` (incl. dev) | **10 total — 0 critical, 2 high, 8 moderate**, all dev-side (electron-builder 26 tree; the 2026-09-21 critical `tar` set is gone post-2.6). See 2.6 |
+| CI | **Active** — `.github/workflows/ci.yml` (Node 22, npm ci, lint, test) + an audit job (`npm audit --omit=dev --audit-level=high`, added 2026-10-07). |
 | Git | **Healthy** — committed in chunks 2026-10-03 (404 files tracked; core, electron, docs+CI, satellites). Fresh-clone `npm ci && npm test` verified green. See Phase 0 |
 | `.gitignore` | **Hardened** — root file now covers `scratchpad/`, `.idea/`, `.vscode/`, `.pixis/`, the root binaries, and `.DS_Store` (2026-10-03) |
 | Satellites | `python_app` has four real behavioural defects and zero tests; `mobile/` renders a retired design. See Phase 3 *(from the 2026-09-14 read-through; not re-verified)* |
@@ -104,9 +104,9 @@ Effort: **S**. The only true blocker in this plan.
       `npm test`, `npm run lint`. The suite is hermetic by design — temp
       `AUTH_DB_FILE`/`SESSIONS_DATA_FILE`, fake Ollama, fake Qdrant client —
       so no external services are needed.
-- [ ] **1.2 Add an audit gate — now unblocked: `npm audit --omit=dev` is
-      clean as of 2026-10-03.** `npm audit --omit=dev --audit-level=high`
-      as a second CI job.
+- [x] **1.2 Add an audit gate** (done 2026-10-07). Second CI job running
+      `npm audit --omit=dev --audit-level=high`. It would have caught the
+      `proxy-addr` critical regression that slipped in after 2026-10-03.
 - [ ] **Verify:** push a branch, watch the workflow pass.
 
 Effort: **XS**. Converts a manual habit into an enforced invariant.
@@ -153,27 +153,31 @@ signup-then-cookie pattern; `test/server-streaming.test.js` fake Ollama).
       regression tests; the predicate is now hoisted to module scope). `messages` is only checked to
       be an array; reuse the `isValidMessage` predicate already at
       `server.js:509` for clean 400s instead of opaque upstream errors.
-- [ ] **2.6 Upgrade `electron-builder` 25 → 26.** Clears the **critical** `tar`
-      hardlink path traversal plus **13 high** advisories in its tree (count
-      re-measured 2026-09-21; `npm audit fix --force` names
-      `electron-builder@26.15.3` as the resolution and flags it breaking).
-      Dev-only tooling (`npm run dist`), so **do not let it block 2.1**. If the
-      build config breaks, pin 25 and accept the dev-only risk. Also routine
-      in-semver bumps: `electron 43.4.0 → ^43.6.0`, `eslint → ^10.10.0`,
-      `globals → ^17.12.0`.
-- [ ] **2.7 Close the "Qdrant reconnection loop" item as already-solved.**
-      `ensureCollection()` re-runs on every upsert/search while
-      `collectionReady` is false (`qdrant.js:28`, reset again at `:76`), so a
-      Qdrant that starts
-      *after* the server is picked up automatically on the next request. Add one
-      test asserting 503-then-success across a fake-client flap (reuse
-      `_setClientForTests`), then drop the item. **No new code path needed.**
-- [ ] Per-username lockout after repeated failed logins (only per-IP today).
-      Low priority for local-first.
-- [ ] Password reset / "forgot password" — see `PLAN.md` Phase E.
-      **Recommended shape: local/CLI reset** (`node auth.js --reset-password
-      <username>`), matching this project's local-first, dependency-averse
-      posture, rather than an emailed-token flow needing SMTP.
+- [x] **2.6 Upgrade `electron-builder` 25 → 26** (done 2026-10-03, commit
+      `7a69157`, with routine in-semver bumps: electron `^43.6.0`,
+      eslint `^10.x`, globals `^17.x`). The critical `tar` and 13-high set are
+      gone; what remains in `npm audit` is 10 dev-side advisories (2 high,
+      8 moderate) in the electron-builder 26 tree — tracked, non-blocking.
+      If the build config breaks, pin 25 and accept the dev-only risk.
+- [x] **2.7 Close the "Qdrant reconnection loop" item as already-solved**
+      (verified 2026-10-07). `ensureCollection()` re-runs on every
+      upsert/search while `collectionReady` is false (`qdrant.js:28`, reset
+      again at `:76`), so a Qdrant that starts *after* the server is picked up
+      automatically on the next request. The flap test exists at
+      `test/qdrant.test.js:191` asserting 503-then-success via
+      `_setClientForTests`. **No code was needed.**
+- [x] Per-username lockout after repeated failed logins (landed 2026-10-07).
+      Failed logins counted per (username, IP) pair in `auth.js`
+      (`loginLockRemaining` / `recordLoginFailure` / `clearLoginFailures`),
+      wired into the login route before any DB/scrypt work, 429 with
+      `Retry-After` at 5 failures / 15 minutes. Deliberately per-pair, not
+      per-username-globally: a global lock would make one attacker able to
+      DoS any account by failing five times. Success clears the pair.
+      Tested in `test/auth.test.js`.
+- [x] Password reset / "forgot password" (done 2026-10-03, commit `cff031b`):
+      **local/CLI reset** — `node auth.js --reset-password <username>` —
+      matching this project's local-first, dependency-averse posture, rather
+      than an emailed-token flow needing SMTP.
 
 Effort: **S** total. Verify: `npm audit --omit=dev` → 0; new tests green;
 `npm run dist` still builds.
@@ -198,11 +202,11 @@ severity.
 
 ### 3.1 `python_app` — four defects
 
-- [ ] **3.1.1 Observability is dead code.** `api.py` defines
-      `logging_metrics_middleware` but `main.py` only registers
-      `AuthMiddleware`. Consequence: `/api/metrics` always returns an empty
-      snapshot and no `X-Request-Id` is ever emitted. **One-line fix** — do this
-      regardless of Decision A.
+- [x] **3.1.1 Observability is dead code** (fixed 2026-10-07). `main.py` now
+      registers `logging_metrics_middleware` (defined in `api.py`) after
+      `AuthMiddleware`; verified statically (import wiring + syntax via the
+      venv). `/api/metrics` is live and `X-Request-Id` is emitted. The
+      remaining 3.1.x items stay open, still gated on Decision A.
 - [ ] **3.1.2 UI login never sets the `sid` cookie** (`pages/login.py`), so a
       browser UI session cannot authenticate against the REST `/api/sessions`
       and `/api/memory` endpoints the app itself ships.
@@ -283,16 +287,12 @@ Carried from `PLAN.md` Phase C. **The Phase B gate is cleared** — sessions are
 now the source of truth and localStorage survives only as a one-time migration
 source behind a confirm banner.
 
-- [ ] **4.1 Wire semantic memory into `/api/chat` (RAG).** *The highest-value
-      feature work in the repo.* `/api/memory/index` and `/api/memory/search`
-      are built and tested but **completely inert — nothing calls them**.
-      Shape: an opt-in `useMemory` flag on the request → embed the latest user
-      message → Qdrant search scoped to `req.user.id` → inject top-k as a system
-      message, placed so `compaction.js`'s marker-scan still works. Auto-index
-      each completed user/assistant turn via a shared helper factored out of the
-      `/api/memory/index` path. **Fail open** in its own try/catch with a
-      timeout like `COMPACTION_TIMEOUT_MS` — a Qdrant outage must never break
-      normal chat. (`PLAN.md` C4)
+- [x] **4.1 Wire semantic memory into `/api/chat` (RAG)** (landed 2026-10,
+      commit `b42195e`; entry was stale). Opt-in `useMemory` flag → embed the
+      latest user message → Qdrant search scoped to `req.user.id` → injected
+      as a system message via `injectMemoryMessage` (server.js), placed so
+      `compaction.js`'s marker-scan still works. Each completed turn is
+      auto-indexed; the path fails open inside its own try/catch. (`PLAN.md` C4)
 - [x] **4.2 Regenerate / edit a message** (landed — `public/app.js`
       `regenerateMessage`, linear-history truncate-and-replay).
       Truncate `chat.messages` and re-call
@@ -305,29 +305,31 @@ source behind a confirm banner.
       the Phase 4 items, so it can jump the queue. Blob + `<a download>`, no new
       dependency; Markdown reuses the existing `[Attached file: ...]` fenced
       format. (`PLAN.md` C2)
-- [ ] **4.4 Chat search.** `db.js`: `searchSessions(userId, query)` as a linear
-      case-insensitive substring scan (fine at documented scale — no index, no
-      library). `server.js`: `GET /api/sessions/search?q=...`, per-user scoped
-      like the other session routes. Frontend: sidebar search input.
-      (`PLAN.md` C3)
-- [ ] **4.5 Frontend testability.** `public/app.js` (1,201 lines) has **zero
-      coverage**. Don't add vitest/jsdom — that breaks the no-build,
-      minimal-deps philosophy. Extract the pure DOM-free helpers into a small
-      plain script with a CommonJS export guard
-      (`if (typeof module !== 'undefined') module.exports = {...}`), loadable by
-      both `<script>` and `node --test`: message shaping incl. attachment
-      folding, `ATTACHMENT_EXTENSIONS` + the 200KB/3-file caps, compaction-marker
-      display, and settings load/defaults/merge. This is also the natural first
-      cut of 5.1.
-- [ ] **4.6 Small server-side coverage adds.** `GET /api/metrics` shape and
-      counters are currently untested — no test file mentions the route. Same
-      for `logger.js`'s format.
-- [ ] **4.7 Image / vision input.** Parallel attachment path: allowlist
-      `.png .jpg .jpeg .webp .gif`, base64 into Ollama's `images: [...]`,
-      thumbnail chip, image-specific size cap. Verify `images` passes through
-      `compactMessages()` unmodified — note the chars heuristic won't count
-      base64 weight. Reuse `db.js`'s existing `attachments` passthrough with a
-      `type: 'image'` discriminator. (`PLAN.md` D3)
+- [x] **4.4 Chat search** (landed 2026-10, commit `d956872`; entry was stale).
+      `db.js searchSessions(userId, query)` — linear case-insensitive
+      substring scan — exposed as `GET /api/sessions/search?q=...` (per-user
+      scoped), with a sidebar search input in the frontend. (`PLAN.md` C3)
+- [ ] **4.5 Frontend testability.** First cut landed —
+      `public/chat-helpers.js` (166 LOC, CommonJS export guard, loaded by both
+      `<script>` and `node --test`, covered by `test/chat-helpers.test.js`).
+      This phase-2 item keeps it moving: extract the *next* stateless chunks
+      from `public/app.js` (1,472 lines) with the same pattern rather than
+      splitting into ES modules now (5.1 is "always last").
+- [x] **4.6 Small server-side coverage adds.** Logger format, metrics
+      aggregation, and now the *server-level* `/api/metrics` route
+      (auth-gate + JSON shape over HTTP, `test/server.test.js`). Done
+      2026-10-07.
+- [x] **4.7 Image / vision input** (landed 2026-10-07). Parallel attachment
+      path: allowlist `.png .jpg .jpeg .webp .gif` (`IMAGE_EXTENSIONS` in
+      chat-helpers.js), 4MB per-image cap, base64 into Ollama's
+      `images: [...]` via `buildOllamaMessages` (text attachments keep the
+      fenced-block path), thumbnail chips in the composer and sent messages,
+      and a `type: 'image'` discriminator on the persisted attachment.
+      Server-side: `/api/chat` and the PATCH routes validate the `images`
+      array shape before forwarding. `compactMessages()` was already
+      passthrough-safe (spread, not rebuild) — pinned by a test; note the
+      chars heuristic indeed does not count base64 weight (documented in
+      test/compaction.test.js). (`PLAN.md` D3)
 - [ ] **4.8 PDF text extraction.** Client-side, vendored pdf.js UMD under
       `public/vendor/` — no live CDN, which keeps "nothing leaves your machine"
       true. DOCX explicitly out of scope. Lowest priority. (`PLAN.md` D4)
@@ -350,10 +352,13 @@ source behind a confirm banner.
       statements, temp-file tests) — no new dependency, keeps the
       native-build-free stance. Document `sessions.json` format stability
       guarantees (or the lack of them) either way.
-- [ ] **5.3 Export/backup tooling** for `data/auth.db` and
-      `data/sessions.json` — e.g. download sessions as JSON from Settings.
-      Months of history can currently only be rescued by copying raw files.
-      Pairs with 5.2.
+- [x] **5.3 Export/backup tooling** (landed 2026-10-07). Auth-scoped
+      `GET /api/export` returns every owned session incl. full messages as
+      a `Content-Disposition` JSON download, backed by `db.exportSessions`;
+      the Settings modal has a "Download my data" button;
+      `node auth.js --backup-authdb [dest-dir]` copies `data/auth.db` to a
+      timestamped file (default `data/backups/`). Session-level Markdown/
+      JSON export (`4.3`) was already available per-chat.
 - [ ] **5.4 UX safety & surfacing.** Confirm dialog for destructive/expensive
       actions (any logged-in user can `DELETE /api/models/:name` today —
       documented, but the dialog is cheap); surface the attachment limits
