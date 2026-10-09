@@ -14,8 +14,8 @@
                  IBM Plex Sans body (italic via font-style where the old
                  serif voice lived — Spectral is gone),
                  IBM Plex Mono for kickers, badges, HUD labels and nav.
-     · Accent  — electric cyan #38f0ff / #00d4ff primary,
-                 violet #7c5cff / #9d6bff secondary,
+     · Accent  — electric cyan #ffb224 / #f2940a primary,
+                 violet #ff7847 / #ff9a5e secondary,
                  neon red-pink #ff3b5c for wanted/danger only.
      · Text    — #eef2fb primary, #8a93ad dim, #5b6480 faint.
      · Shape   — glassmorphism: translucent dark surfaces, 1px translucent
@@ -92,17 +92,20 @@
   --text-dim: #8a93ad;
   --text-faint: #5b6480;
 
-  --cyan: #38f0ff;
-  --cyan-hi: #8ffaff;
-  --cyan-deep: #00d4ff;
-  --violet: #7c5cff;
-  --violet-hi: #9d6bff;
+  /* SUNSET NOIR — primary accent is sunset amber, secondary is burnt orange.
+     The old cyan/--cyan names are kept as aliases so 245 downstream rules
+     keep resolving; only the VALUES change. */
+  --cyan: #ffb224;              /* primary accent — sunset amber */
+  --cyan-hi: #ffd75e;           /* highlight amber */
+  --cyan-deep: #f2940a;         /* deep amber */
+  --violet: #ff7847;            /* secondary — burnt orange */
+  --violet-hi: #ff9a5e;         /* highlight orange */
 
-  --danger: #ff3b5c;
-  --danger-hi: #ff6b85;
-  --danger-deep: #d1173f;
-  --danger-glow: rgba(255, 59, 92, 0.4);
-  --danger-soft: rgba(255, 59, 92, 0.12);
+  --danger: #ff4d3d;            /* wanted/danger — ember red */
+  --danger-hi: #ff7a6b;
+  --danger-deep: #d92817;
+  --danger-glow: rgba(255, 77, 61, 0.4);
+  --danger-soft: rgba(255, 77, 61, 0.12);
 
   --amber: #ffb224;             /* SHROUD: promoted to the marketing signal colour */
   --green: #3ddc97;
@@ -118,17 +121,17 @@
   /* SHROUD type — the serif voice */
   --font-serif: "Spectral", Georgia, "Times New Roman", serif;
 
-  --line: rgba(148, 163, 208, 0.14);
-  --line-strong: rgba(148, 163, 208, 0.3);
-  --line-on-dark: rgba(148, 163, 208, 0.16);
-  --line-on-dark-strong: rgba(148, 163, 208, 0.3);
-  --line-cyan: rgba(56, 240, 255, 0.2);
-  --line-cyan-strong: rgba(56, 240, 255, 0.45);
-  --line-violet: rgba(124, 92, 255, 0.3);
+  --line: rgba(214, 186, 148, 0.14);
+  --line-strong: rgba(214, 186, 148, 0.3);
+  --line-on-dark: rgba(214, 186, 148, 0.16);
+  --line-on-dark-strong: rgba(214, 186, 148, 0.3);
+  --line-cyan: rgba(255, 178, 36, 0.2);
+  --line-cyan-strong: rgba(255, 178, 36, 0.45);
+  --line-violet: rgba(255, 120, 71, 0.3);
 
-  --glow-cyan: rgba(56, 240, 255, 0.35);
-  --glow-cyan-soft: rgba(56, 240, 255, 0.14);
-  --glow-violet: rgba(124, 92, 255, 0.35);
+  --glow-cyan: rgba(255, 178, 36, 0.35);
+  --glow-cyan-soft: rgba(255, 178, 36, 0.14);
+  --glow-violet: rgba(255, 120, 71, 0.35);
   --shadow: rgba(0, 0, 0, 0.5);
 
   --font-display: "Bricolage Grotesque", "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
@@ -148,13 +151,13 @@
   /* HOLOGRID OS tokens — the holographic evolution layer. --holo-mag is a
      third iridescent stop used ONLY inside gradients, never as a semantic
      color: danger stays #ff3b5c, amber stays the game package color. */
-  --holo-mag: #ff5cd0;
-  --holo-grad: linear-gradient(115deg, #5af6ff, #8f6bff 52%, #ff5cd0);
-  --holo-soft: linear-gradient(115deg, rgba(90, 246, 255, 0.5), rgba(143, 107, 255, 0.5) 52%, rgba(255, 92, 208, 0.45));
+  --holo-mag: #ff5c47;
+  --holo-grad: linear-gradient(115deg, #ffb224, #ff9046 52%, #ff5c47);
+  --holo-soft: linear-gradient(115deg, rgba(255, 178, 36, 0.5), rgba(255, 144, 70, 0.5) 52%, rgba(255, 92, 71, 0.45));
   --fringe: repeating-linear-gradient(115deg,
-    rgba(90, 246, 255, 0.045) 0 1px, transparent 1px 8px,
-    rgba(255, 92, 208, 0.035) 8px 9px, transparent 9px 16px);
-  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 28px rgba(90, 246, 255, 0.05);
+    rgba(255, 200, 90, 0.045) 0 1px, transparent 1px 8px,
+    rgba(255, 92, 71, 0.035) 8px 9px, transparent 9px 16px);
+  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 28px rgba(255, 200, 90, 0.05);
   --scanlines: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 3px);
   --dur-slow: 600ms;
   --ease-holo: cubic-bezier(0.22, 1, 0.36, 1);   /* long-tail settle */
@@ -162,7 +165,7 @@
   /* DISPATCH (v2) tokens — structural evolution layer: the dispatch rail,
      document hairlines, ghost chapter numerals, and the scan-decode
      reveal. Nothing above is removed; these are additive. */
-  --hair: rgba(148, 163, 208, 0.10);
+  --hair: rgba(214, 186, 148, 0.10);
   /* SHROUD: ghost numerals recoloured cyan→amber (the warm channel) */
   --ch-stroke: rgba(255, 178, 36, 0.16);
   --rail-x: clamp(10px, 2.2vw, 30px);
@@ -203,10 +206,10 @@ body::before {
   z-index: -2;
   pointer-events: none;
   background:
-    radial-gradient(38% 42% at 16% 20%, rgba(0, 212, 255, 0.13), transparent 70%),
-    radial-gradient(34% 40% at 84% 10%, rgba(124, 92, 255, 0.07), transparent 70%),
-    radial-gradient(44% 48% at 70% 80%, rgba(0, 212, 255, 0.07), transparent 70%),
-    radial-gradient(30% 34% at 28% 88%, rgba(124, 92, 255, 0.07), transparent 70%);
+    radial-gradient(38% 42% at 16% 20%, rgba(242, 148, 10, 0.13), transparent 70%),
+    radial-gradient(34% 40% at 84% 10%, rgba(255, 120, 71, 0.07), transparent 70%),
+    radial-gradient(44% 48% at 70% 80%, rgba(242, 148, 10, 0.07), transparent 70%),
+    radial-gradient(30% 34% at 28% 88%, rgba(255, 120, 71, 0.07), transparent 70%);
   animation: mesh-drift 28s var(--ease) infinite alternate;
   will-change: transform;
 }
@@ -447,13 +450,13 @@ html.js .reveal-scan.in-view::after {
   border: 1px solid var(--line-cyan);
   border-radius: var(--r-pill);
   padding: var(--s2) var(--s2) var(--s2) var(--s5);
-  box-shadow: 0 10px 26px var(--shadow), 0 0 18px rgba(56, 240, 255, 0.06), var(--glass-hi);
+  box-shadow: 0 10px 26px var(--shadow), 0 0 18px rgba(255, 178, 36, 0.06), var(--glass-hi);
   transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease),
     padding 0.28s var(--ease-sig), background 0.28s var(--ease);
 }
 #nav.is-scrolled .nav-shell {
   border-color: var(--line-cyan-strong);
-  box-shadow: 0 14px 34px var(--shadow), 0 0 22px rgba(56, 240, 255, 0.14), var(--glass-hi);
+  box-shadow: 0 14px 34px var(--shadow), 0 0 22px rgba(255, 178, 36, 0.14), var(--glass-hi);
 }
 .brand {
   display: inline-flex;
@@ -537,7 +540,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   flex: none;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 8px 22px -6px var(--glow-cyan), 0 0 16px rgba(124, 92, 255, 0.22);
+  box-shadow: 0 8px 22px -6px var(--glow-cyan), 0 0 16px rgba(255, 120, 71, 0.22);
   transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), filter var(--dur) var(--ease);
 }
 /* HOLOGRID: one hover shine streak sweeping across the gradient fill */
@@ -561,7 +564,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 .nav-cta:hover {
   transform: translateY(-2px);
   filter: brightness(1.12);
-  box-shadow: 0 12px 28px -6px var(--glow-cyan), 0 0 26px rgba(124, 92, 255, 0.35);
+  box-shadow: 0 12px 28px -6px var(--glow-cyan), 0 0 26px rgba(255, 120, 71, 0.35);
 }
 .nav-cta:active { transform: scale(0.97); }
 .nav-cta-mobile { display: none; }
@@ -639,8 +642,8 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 .hero, .page-hero, .closing {
   background-color: #070b16;
   background-image:
-    linear-gradient(rgba(56, 240, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 240, 255, 0.045) 1px, transparent 1px);
+    linear-gradient(rgba(255, 178, 36, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 178, 36, 0.045) 1px, transparent 1px);
   background-size: 44px 44px;
   color: var(--text);
 }
@@ -662,9 +665,9 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   width: 150vmax; height: 150vmax;
   transform: translate(-50%, -50%);
   background:
-    conic-gradient(from 0deg, rgba(56, 240, 255, 0.05), transparent 14%),
+    conic-gradient(from 0deg, rgba(255, 178, 36, 0.05), transparent 14%),
     repeating-radial-gradient(circle at 50% 50%,
-      rgba(56, 240, 255, 0.03) 0 2px, transparent 2px 84px);
+      rgba(255, 178, 36, 0.03) 0 2px, transparent 2px 84px);
   -webkit-mask-image: radial-gradient(closest-side, #000 24%, transparent 68%);
   mask-image: radial-gradient(closest-side, #000 24%, transparent 68%);
   animation: radar-spin 80s linear infinite;
@@ -689,8 +692,8 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   left: -20%; right: -20%; bottom: -6%;
   height: 52%;
   background-image:
-    linear-gradient(rgba(56, 240, 255, 0.22) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 240, 255, 0.22) 1px, transparent 1px);
+    linear-gradient(rgba(255, 178, 36, 0.22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 178, 36, 0.22) 1px, transparent 1px);
   background-size: 44px 44px;
   transform: perspective(620px) rotateX(62deg);
   transform-origin: top center;
@@ -715,7 +718,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   left: 50%; bottom: -18%;
   width: 90rem; height: 40rem;
   transform: translateX(-50%);
-  background: radial-gradient(closest-side, rgba(0, 212, 255, 0.22), rgba(255, 178, 36, 0.07) 56%, transparent 72%);
+  background: radial-gradient(closest-side, rgba(242, 148, 10, 0.22), rgba(255, 178, 36, 0.07) 56%, transparent 72%);
   opacity: 0.55;
   filter: blur(10px);
 }
@@ -735,7 +738,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
    background-position animates — paint-only, no new element. */
 .hero::after {
   background-image:
-    linear-gradient(90deg, transparent, rgba(143, 250, 255, 0.8), rgba(143, 107, 255, 0.7), transparent),
+    linear-gradient(90deg, transparent, rgba(143, 250, 255, 0.8), rgba(255, 144, 70, 0.7), transparent),
     linear-gradient(90deg, transparent, var(--line-cyan-strong) 18%, var(--line-violet) 82%, transparent);
   background-size: 40px 1px, 100% 1px;
   background-repeat: no-repeat, no-repeat;
@@ -754,7 +757,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   height: 1px;
   z-index: 1;
   pointer-events: none;
-  background-image: linear-gradient(90deg, transparent, rgba(143, 250, 255, 0.8), rgba(143, 107, 255, 0.7), transparent);
+  background-image: linear-gradient(90deg, transparent, rgba(143, 250, 255, 0.8), rgba(255, 144, 70, 0.7), transparent);
   background-size: 40px 1px;
   background-repeat: no-repeat;
   background-position: 0% 0;
@@ -839,7 +842,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   justify-content: center;
   width: 32px; height: 32px;
   flex: none;
-  background: rgba(56, 240, 255, 0.06);
+  background: rgba(255, 178, 36, 0.06);
   color: var(--text-dim);
   border: 1px solid var(--line-cyan);
   border-radius: var(--r-sm);
@@ -879,8 +882,8 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   z-index: 0;
   clip-path: polygon(46% 100%, 54% 100%, 100% 0, 0 0);
   background:
-    radial-gradient(36% 10% at 50% 97%, rgba(90, 246, 255, 0.4), transparent 70%),
-    linear-gradient(0deg, rgba(90, 246, 255, 0.12), rgba(90, 246, 255, 0.045) 52%, transparent 78%);
+    radial-gradient(36% 10% at 50% 97%, rgba(255, 200, 90, 0.4), transparent 70%),
+    linear-gradient(0deg, rgba(255, 200, 90, 0.12), rgba(255, 200, 90, 0.045) 52%, transparent 78%);
   opacity: 0.6;
   animation: holo-flicker 4s ease-in-out infinite;
 }
@@ -892,16 +895,43 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 .ring {
   position: absolute;
   left: 50%; top: 50%;
-  border: 1px dashed rgba(56, 240, 255, 0.22);
+  border: 1px dashed rgba(255, 178, 36, 0.22);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   animation: ring-pulse 5s var(--ease) infinite;
 }
 .ring.r1 { width: 112%; padding-top: 112%; }
-.ring.r2 { width: 88%; padding-top: 88%; animation-delay: 2.5s; border-color: rgba(124, 92, 255, 0.2); }
+.ring.r2 { width: 88%; padding-top: 88%; animation-delay: 2.5s; border-color: rgba(255, 120, 71, 0.2); }
 @keyframes ring-pulse {
   0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
   50% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); }
+}
+
+/* ---- the 3D hero city (three.js canvas) — sits inside .tilt, above the
+   hologram cone, below the chips; the CSS mock-card stays underneath as
+   the no-WebGL fallback and the WebGL canvas simply covers it when live. */
+.hero3d {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: grab;
+}
+.hero3d:active { cursor: grabbing; }
+.hero3d-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 200, 90, 0.14);
+}
+/* when the 3D scene is live it replaces the mock card visually; the mock
+   stays in the layout for fallback but is hidden behind the canvas */
+.hero3d ~ .demo-card { opacity: 0.92; }
+.hero3d:not(:empty) ~ .demo-card { visibility: hidden; }
+/* keep chips above the canvas */
+.tilt .chip { z-index: 3; }
+@media (max-width: 720px) {
+  .hero3d { min-height: 340px; position: relative; inset: auto; height: 340px; }
 }
 
 .tilt {
@@ -947,7 +977,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 }
 @keyframes frame-pulse {
   0%, 100% { box-shadow: 0 30px 60px var(--shadow), 0 0 16px var(--glow-cyan-soft); }
-  50% { box-shadow: 0 30px 60px var(--shadow), 0 0 26px rgba(124, 92, 255, 0.25); }
+  50% { box-shadow: 0 30px 60px var(--shadow), 0 0 26px rgba(255, 120, 71, 0.25); }
 }
 .demo-bar {
   display: flex;
@@ -1049,7 +1079,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 }
 .marquee-track i:nth-of-type(3n) {
   background: var(--holo-mag);
-  box-shadow: 0 0 6px rgba(255, 92, 208, 0.4);
+  box-shadow: 0 0 6px rgba(255, 92, 71, 0.4);
 }
 @keyframes marq { to { transform: translateX(-50%); } }
 
@@ -1140,7 +1170,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
    motion and glow read as emphasis rather than uniform noise. */
 .b-cell.is-hero {
   background-image:
-    linear-gradient(115deg, transparent 34%, rgba(143, 250, 255, 0.07) 48%, rgba(255, 255, 255, 0.055) 52%, rgba(143, 107, 255, 0.05) 58%, transparent 72%),
+    linear-gradient(115deg, transparent 34%, rgba(143, 250, 255, 0.07) 48%, rgba(255, 255, 255, 0.055) 52%, rgba(255, 144, 70, 0.05) 58%, transparent 72%),
     var(--fringe);
   background-size: 240% 240%, auto;
   background-repeat: no-repeat, repeat;
@@ -1281,7 +1311,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   background-color: var(--panel);
   /* HOLOGRID: fringe + hover sheen, same layering as .b-cell */
   background-image:
-    linear-gradient(115deg, transparent 34%, rgba(143, 250, 255, 0.07) 48%, rgba(255, 255, 255, 0.055) 52%, rgba(143, 107, 255, 0.05) 58%, transparent 72%),
+    linear-gradient(115deg, transparent 34%, rgba(143, 250, 255, 0.07) 48%, rgba(255, 255, 255, 0.055) 52%, rgba(255, 144, 70, 0.05) 58%, transparent 72%),
     var(--fringe);
   background-size: 240% 240%, auto;
   background-repeat: no-repeat, repeat;
@@ -1322,7 +1352,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 .app-cmd {
   margin-top: auto;
   align-self: flex-start;
-  background: rgba(56, 240, 255, 0.06);
+  background: rgba(255, 178, 36, 0.06);
   border: 1px solid var(--line-cyan);
   border-radius: var(--r-sm);
   padding: var(--s2) var(--s3);
@@ -1372,15 +1402,15 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 .step:nth-child(3) .node { animation-delay: 1.3s; }
 .step:nth-child(4) .node { animation-delay: 1.95s; }
 @keyframes node-ping {
-  0% { box-shadow: 0 0 10px var(--glow-cyan), 0 0 0 0 rgba(56, 240, 255, 0.35); }
-  70%, 100% { box-shadow: 0 0 10px var(--glow-cyan), 0 0 0 12px rgba(56, 240, 255, 0); }
+  0% { box-shadow: 0 0 10px var(--glow-cyan), 0 0 0 0 rgba(255, 178, 36, 0.35); }
+  70%, 100% { box-shadow: 0 0 10px var(--glow-cyan), 0 0 0 12px rgba(255, 178, 36, 0); }
 }
 .step-body h3 { margin-bottom: var(--s2); }
 .step-body > p { color: var(--text-dim); font-size: 0.97rem; max-width: 56ch; margin-bottom: var(--s3); }
 .step-body a { color: var(--cyan); font-weight: 600; }
 .step-code {
   display: inline-block;
-  background: rgba(56, 240, 255, 0.06);
+  background: rgba(255, 178, 36, 0.06);
   border: 1px solid var(--line-cyan);
   border-radius: var(--r-sm);
   padding: var(--s2) var(--s3);
@@ -1452,7 +1482,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   margin-bottom: var(--s6);
 }
 /* HOLOGRID: resting holo glow on the big display heads */
-h1.display, .closing-h { text-shadow: 0 0 34px rgba(56, 240, 255, 0.18); }
+h1.display, .closing-h { text-shadow: 0 0 34px rgba(255, 178, 36, 0.18); }
 .closing-note { color: var(--text-faint); margin-top: var(--s5); font-family: var(--font-mono); }
 
 /* ==========================================================================
@@ -1463,12 +1493,12 @@ h1.display, .closing-h { text-shadow: 0 0 34px rgba(56, 240, 255, 0.18); }
   padding-top: clamp(var(--s7), 8vw, var(--s9));
   background-color: #060a12;
   background-image:
-    linear-gradient(rgba(56, 240, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 240, 255, 0.035) 1px, transparent 1px);
+    linear-gradient(rgba(255, 178, 36, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 178, 36, 0.035) 1px, transparent 1px);
   background-size: 44px 44px;
   color: var(--text);
   /* HOLOGRID: one quiet hairline glow along the top edge — no motion here */
-  box-shadow: 0 -14px 40px -28px rgba(56, 240, 255, 0.6);
+  box-shadow: 0 -14px 40px -28px rgba(255, 178, 36, 0.6);
 }
 .footer-grid {
   display: grid;
@@ -1551,9 +1581,9 @@ h1.display, .closing-h { text-shadow: 0 0 34px rgba(56, 240, 255, 0.18); }
   border-radius: 50%;
   padding: 1px;
   background: conic-gradient(from var(--hud-sweep),
-    rgba(56, 240, 255, 0.9) 40deg,
-    rgba(157, 107, 255, 0.85) 84deg,
-    rgba(255, 92, 208, 0.7) 110deg,
+    rgba(255, 178, 36, 0.9) 40deg,
+    rgba(255, 154, 94, 0.85) 84deg,
+    rgba(255, 92, 71, 0.7) 110deg,
     transparent 150deg);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
@@ -1670,7 +1700,7 @@ h1.display, .closing-h { text-shadow: 0 0 34px rgba(56, 240, 255, 0.18); }
   cursor: pointer;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.chat-close:hover { background: rgba(56, 240, 255, 0.08); color: var(--text); }
+.chat-close:hover { background: rgba(255, 178, 36, 0.08); color: var(--text); }
 .chat-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 
 .chat-log {
@@ -1687,7 +1717,7 @@ h1.display, .closing-h { text-shadow: 0 0 34px rgba(56, 240, 255, 0.18); }
 .chat-msg { display: flex; }
 .chat-msg-user { justify-content: flex-end; }
 .chat-msg-user .chat-bubble {
-  background: rgba(56, 240, 255, 0.08);
+  background: rgba(255, 178, 36, 0.08);
   border: 1px solid var(--line-cyan);
   border-radius: var(--r-md);
   padding: var(--s3) var(--s4);
@@ -1769,7 +1799,7 @@ h1.display, .closing-h { text-shadow: 0 0 34px rgba(56, 240, 255, 0.18); }
   cursor: pointer;
   transition: background var(--dur) var(--ease);
 }
-.chat-stop:hover { background: rgba(56, 240, 255, 0.08); }
+.chat-stop:hover { background: rgba(255, 178, 36, 0.08); }
 .chat-foot {
   text-align: center;
   color: var(--text-faint);
@@ -1838,7 +1868,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   background-color: var(--panel);
   /* HOLOGRID: fringe + hover sheen, same layering as .b-cell */
   background-image:
-    linear-gradient(115deg, transparent 34%, rgba(143, 250, 255, 0.07) 48%, rgba(255, 255, 255, 0.055) 52%, rgba(143, 107, 255, 0.05) 58%, transparent 72%),
+    linear-gradient(115deg, transparent 34%, rgba(143, 250, 255, 0.07) 48%, rgba(255, 255, 255, 0.055) 52%, rgba(255, 144, 70, 0.05) 58%, transparent 72%),
     var(--fringe);
   background-size: 240% 240%, auto;
   background-repeat: no-repeat, repeat;
@@ -1919,7 +1949,7 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 }
 .game-keys li { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; justify-content: center; }
 .key {
-  background: rgba(56, 240, 255, 0.08);
+  background: rgba(255, 178, 36, 0.08);
   border: 1px solid var(--line-cyan-strong);
   border-radius: 6px;
   padding: 2px 8px;
@@ -2035,8 +2065,8 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 }
 /* HOLOGRID: the big play button breathes — a slow glow swell */
 @keyframes cta-breathe {
-  0%, 100% { box-shadow: 0 8px 22px -6px var(--glow-cyan), 0 0 16px rgba(124, 92, 255, 0.22); }
-  50% { box-shadow: 0 10px 30px -4px var(--glow-cyan), 0 0 30px rgba(124, 92, 255, 0.4); }
+  0%, 100% { box-shadow: 0 8px 22px -6px var(--glow-cyan), 0 0 16px rgba(255, 120, 71, 0.22); }
+  50% { box-shadow: 0 10px 30px -4px var(--glow-cyan), 0 0 30px rgba(255, 120, 71, 0.4); }
 }
 
 /* wanted-star meter — hero mock, wanted.html, progression.html: neon red-pink */
@@ -2074,8 +2104,8 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   height: 300px;
   overflow: hidden;
   background:
-    radial-gradient(120% 140% at 26% 0%, rgba(0, 212, 255, 0.14), transparent 55%),
-    radial-gradient(90% 110% at 80% 10%, rgba(124, 92, 255, 0.12), transparent 60%),
+    radial-gradient(120% 140% at 26% 0%, rgba(242, 148, 10, 0.14), transparent 55%),
+    radial-gradient(90% 110% at 80% 10%, rgba(255, 120, 71, 0.12), transparent 60%),
     linear-gradient(180deg, #0b1020, #070b14 78%);
 }
 .mock-skyline {
@@ -2087,21 +2117,21 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
 .mock-skyline i {
   display: block; flex: 1;
   background: #101828;
-  border-top: 1px solid rgba(56, 240, 255, 0.16);
+  border-top: 1px solid rgba(255, 178, 36, 0.16);
   position: relative;
 }
 .mock-skyline i::before {
   content: "";
   position: absolute; inset: 8px 5px auto;
   height: 3px;
-  background: rgba(56, 240, 255, 0.55);
-  box-shadow: 0 14px 0 rgba(56, 240, 255, 0.32), 0 28px 0 rgba(56, 240, 255, 0.18), 0 42px 0 rgba(56, 240, 255, 0.09);
+  background: rgba(255, 178, 36, 0.55);
+  box-shadow: 0 14px 0 rgba(255, 178, 36, 0.32), 0 28px 0 rgba(255, 178, 36, 0.18), 0 42px 0 rgba(255, 178, 36, 0.09);
 }
 .mock-skyline i:nth-child(3n) { background: #131c30; }
 .mock-road {
   position: absolute; left: 0; right: 0; bottom: 0; height: 34px;
   background: #0b101c;
-  border-top: 2px dashed rgba(56, 240, 255, 0.2);
+  border-top: 2px dashed rgba(255, 178, 36, 0.2);
 }
 .mock-road::before, .mock-road::after {
   content: "";
@@ -2150,8 +2180,8 @@ html:not(.js) .nav-menu a.is-active::after { transform: scaleX(1); }
   height: 34%;
   z-index: 3;
   pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(56, 240, 255, 0.07) 42%,
-    rgba(143, 250, 255, 0.14) 50%, rgba(56, 240, 255, 0.07) 58%, transparent);
+  background: linear-gradient(180deg, transparent, rgba(255, 178, 36, 0.07) 42%,
+    rgba(143, 250, 255, 0.14) 50%, rgba(255, 178, 36, 0.07) 58%, transparent);
   transform: translateY(-130%);
   animation: scan-sweep 6.5s linear infinite;
 }
@@ -2233,8 +2263,8 @@ html.cursor-on .cursor-dot.is-near {
   background: var(--violet-hi);
   /* HOLOGRID: dot becomes ring+dot — a soft 22px ring via spread shadows */
   box-shadow:
-    0 0 0 6px rgba(157, 107, 255, 0.14),
-    0 0 0 7px rgba(56, 240, 255, 0.3),
+    0 0 0 6px rgba(255, 154, 94, 0.14),
+    0 0 0 7px rgba(255, 178, 36, 0.3),
     0 0 16px var(--glow-violet), 0 0 30px var(--glow-cyan-soft);
 }
 
@@ -2245,7 +2275,7 @@ html.cursor-on .cursor-dot.is-near {
   left: var(--s5); right: var(--s5);
   height: 2px;
   border-radius: var(--r-pill);
-  background: rgba(148, 163, 208, 0.1);
+  background: rgba(214, 186, 148, 0.1);
   overflow: hidden;
   pointer-events: none;
 }
@@ -2265,7 +2295,7 @@ html.cursor-on .cursor-dot.is-near {
   -webkit-backdrop-filter: blur(22px) saturate(1.25);
   backdrop-filter: blur(22px) saturate(1.25);
   border-color: var(--line-cyan-strong);
-  box-shadow: 0 14px 34px var(--shadow), 0 0 24px rgba(56, 240, 255, 0.16);
+  box-shadow: 0 14px 34px var(--shadow), 0 0 24px rgba(255, 178, 36, 0.16);
 }
 #nav.is-past-hero .brand { font-size: 0.85rem; }
 
@@ -2281,8 +2311,8 @@ html.cursor-on .cursor-dot.is-near {
   border-radius: inherit;
   background: radial-gradient(
     240px circle at var(--spot-x, 50%) var(--spot-y, 50%),
-    rgba(56, 240, 255, 0.13),
-    rgba(124, 92, 255, 0.055) 44%,
+    rgba(255, 178, 36, 0.13),
+    rgba(255, 120, 71, 0.055) 44%,
     transparent 68%
   );
   opacity: 0;
@@ -2313,9 +2343,9 @@ html.cursor-on .cursor-dot.is-near {
   /* HOLOGRID: 3-stop iridescent arc — cyan → violet → magenta */
   background: conic-gradient(from var(--hud-sweep),
     transparent 0deg,
-    rgba(56, 240, 255, 0.95) 42deg,
-    rgba(157, 107, 255, 0.9) 86deg,
-    rgba(255, 92, 208, 0.7) 112deg,
+    rgba(255, 178, 36, 0.95) 42deg,
+    rgba(255, 154, 94, 0.9) 86deg,
+    rgba(255, 92, 71, 0.7) 112deg,
     transparent 150deg);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
@@ -2351,9 +2381,9 @@ html.cursor-on .cursor-dot.is-near {
   /* HOLOGRID: same 3-stop iridescent arc as the hero frames */
   background: conic-gradient(from var(--hud-sweep),
     transparent 0deg,
-    rgba(56, 240, 255, 0.75) 40deg,
-    rgba(157, 107, 255, 0.7) 84deg,
-    rgba(255, 92, 208, 0.55) 108deg,
+    rgba(255, 178, 36, 0.75) 40deg,
+    rgba(255, 154, 94, 0.7) 84deg,
+    rgba(255, 92, 71, 0.55) 108deg,
     transparent 144deg);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
@@ -2395,16 +2425,16 @@ html.cursor-on .cursor-dot.is-near {
    strobing. */
 @keyframes hud-glitch {
   0%, 100% { text-shadow: none; transform: none; }
-  18% { text-shadow: -1.5px 0 rgba(56, 240, 255, 0.8), 1.5px 0 rgba(255, 59, 92, 0.45); transform: translateX(0.6px); }
-  36% { text-shadow: 1.5px 0 rgba(56, 240, 255, 0.8), -1.5px 0 rgba(124, 92, 255, 0.55); transform: translateX(-0.6px); }
-  54% { text-shadow: -1px 0 rgba(255, 59, 92, 0.4), 1px 0 rgba(56, 240, 255, 0.7); transform: translateX(0.4px); }
-  72% { text-shadow: 1px 0 rgba(124, 92, 255, 0.5), -1px 0 rgba(56, 240, 255, 0.6); transform: none; }
+  18% { text-shadow: -1.5px 0 rgba(255, 178, 36, 0.8), 1.5px 0 rgba(255, 59, 92, 0.45); transform: translateX(0.6px); }
+  36% { text-shadow: 1.5px 0 rgba(255, 178, 36, 0.8), -1.5px 0 rgba(255, 120, 71, 0.55); transform: translateX(-0.6px); }
+  54% { text-shadow: -1px 0 rgba(255, 59, 92, 0.4), 1px 0 rgba(255, 178, 36, 0.7); transform: translateX(0.4px); }
+  72% { text-shadow: 1px 0 rgba(255, 120, 71, 0.5), -1px 0 rgba(255, 178, 36, 0.6); transform: none; }
 }
 @keyframes hud-glitch-soft {
   0%, 100% { text-shadow: none; }
-  25% { text-shadow: -1.2px 0 rgba(5, 16, 24, 0.8), 1.2px 0 rgba(56, 240, 255, 0.9); }
+  25% { text-shadow: -1.2px 0 rgba(5, 16, 24, 0.8), 1.2px 0 rgba(255, 178, 36, 0.9); }
   55% { text-shadow: 1.2px 0 rgba(5, 16, 24, 0.8), -1.2px 0 rgba(255, 59, 92, 0.7); }
-  80% { text-shadow: -0.8px 0 rgba(56, 240, 255, 0.8), 0.8px 0 rgba(124, 92, 255, 0.8); }
+  80% { text-shadow: -0.8px 0 rgba(255, 178, 36, 0.8), 0.8px 0 rgba(255, 120, 71, 0.8); }
 }
 h1.display:hover, .closing-h:hover {
   animation: hud-glitch 0.48s steps(4) 1;
@@ -2454,7 +2484,7 @@ h1.display:hover, .closing-h:hover {
   width: 8px; height: 8px;
   margin-left: -4px; margin-top: -4px;
   clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
-  background: rgba(56, 240, 255, 0.55);
+  background: rgba(255, 178, 36, 0.55);
 }
 /* a faint 10px tick mark beside the line at every station */
 .rail-station::after {
@@ -2528,7 +2558,7 @@ h1.display:hover, .closing-h:hover {
 .ledger-row:nth-child(7)::before { transition-delay: 0.36s; }
 .ledger-row:nth-child(8)::before { transition-delay: 0.42s; }
 .ledger-row:nth-child(9)::before { transition-delay: 0.48s; }
-.ledger-row:hover { background: rgba(56, 240, 255, 0.03); }
+.ledger-row:hover { background: rgba(255, 178, 36, 0.03); }
 .ledger-num {
   font-family: var(--font-mono);
   color: var(--text-faint);
@@ -2824,7 +2854,7 @@ body { counter-reset: port; }
   font-size: 0.62rem;
   letter-spacing: 0.26em;
   color: var(--text-dim);
-  border: 1px solid rgba(56, 240, 255, 0.3);
+  border: 1px solid rgba(255, 178, 36, 0.3);
   border-radius: var(--r-sm);
   clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 12px,
     100% calc(100% - 12px), calc(100% - 12px) 100%, 12px 100%,
@@ -2867,9 +2897,9 @@ html.js .reveal-depth:not(.in-view) {
 html.js .port.reveal-depth.in-view::before { animation: port-land 0.9s var(--ease) 1; }
 html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-warm; }
 @keyframes port-land {
-  0% { box-shadow: 0 0 0 rgba(56, 240, 255, 0); }
-  35% { box-shadow: 0 0 24px rgba(56, 240, 255, 0.32), inset 0 0 22px rgba(56, 240, 255, 0.1); }
-  100% { box-shadow: 0 0 0 rgba(56, 240, 255, 0); }
+  0% { box-shadow: 0 0 0 rgba(255, 178, 36, 0); }
+  35% { box-shadow: 0 0 24px rgba(255, 178, 36, 0.32), inset 0 0 22px rgba(255, 178, 36, 0.1); }
+  100% { box-shadow: 0 0 0 rgba(255, 178, 36, 0); }
 }
 @keyframes port-land-warm {
   0% { box-shadow: 0 0 0 rgba(255, 178, 36, 0); }
@@ -2909,7 +2939,7 @@ html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-w
   content: "";
   position: absolute;
   inset: 8px;
-  border: 1px solid rgba(56, 240, 255, 0.22);
+  border: 1px solid rgba(255, 178, 36, 0.22);
   border-radius: var(--r-sm);
   clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px,
     100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%,
@@ -2931,7 +2961,7 @@ html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-w
   width: 72px; height: 72px;
   border-radius: 50%;
   border: 1px solid var(--line-cyan-strong);
-  box-shadow: inset 0 0 18px rgba(56, 240, 255, 0.06);
+  box-shadow: inset 0 0 18px rgba(255, 178, 36, 0.06);
 }
 .phi-rings i + i { margin-left: -22px; }
 .phi-rings i:nth-child(2) { border-color: var(--line-amber-strong); box-shadow: inset 0 0 18px var(--glow-amber-soft); }
@@ -2944,7 +2974,7 @@ html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-w
 }
 .phi-tiles i {
   border-radius: 3px;
-  border: 1px solid rgba(148, 163, 208, 0.18);
+  border: 1px solid rgba(214, 186, 148, 0.18);
 }
 .t-road { background: #2b2f37; } .t-side { background: #565c66; }
 .t-bldg { background: #7a5a3a; } .t-park { background: #3f6b45; }
@@ -2958,7 +2988,7 @@ html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-w
   align-items: center;
   justify-content: center;
   width: 58px; height: 58px;
-  background: rgba(56, 240, 255, 0.08);
+  background: rgba(255, 178, 36, 0.08);
   border: 1px solid var(--line-cyan-strong);
   border-radius: 8px;
   box-shadow: var(--glass-hi);
@@ -3068,14 +3098,14 @@ html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-w
 .mem-strip i {
   border: 1px solid var(--line-cyan);
   border-radius: var(--r-sm);
-  background: rgba(56, 240, 255, 0.06);
+  background: rgba(255, 178, 36, 0.06);
   padding: var(--s2) var(--s4);
   font-family: var(--font-mono);
   font-size: 0.78rem;
   letter-spacing: 0.1em;
   color: var(--cyan);
 }
-.mem-strip i:nth-child(2) { border-color: var(--line-violet); color: var(--violet-hi); background: rgba(124, 92, 255, 0.08); }
+.mem-strip i:nth-child(2) { border-color: var(--line-violet); color: var(--violet-hi); background: rgba(255, 120, 71, 0.08); }
 .mem-strip i:nth-child(3) { border-color: var(--line-amber-strong); color: var(--amber); background: rgba(255, 178, 36, 0.07); }
 .k-best::before { content: "lta-best"; }
 .k-stats::before { content: "lta-stats"; }

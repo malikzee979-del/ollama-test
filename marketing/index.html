@@ -81,7 +81,11 @@
           <span class="ring r1"></span>
           <span class="ring r2"></span>
         </div>
+        <!-- 3D hero city: three.js drops a WebGL canvas in here when
+             available; the CSS mock-city card below stays as the
+             no-WebGL / reduced-motion fallback (three-hero.js keeps it). -->
         <div class="tilt" id="tiltCard">
+          <div id="hero3d" class="hero3d" aria-label="3D night city with moving traffic — drag to rotate"></div>
           <div class="demo-card">
             <div class="demo-bar">
               <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -107,7 +111,7 @@
           </div>
           <span class="chip chip-a mono" aria-hidden="true">0 bytes out</span>
           <span class="chip chip-b mono" aria-hidden="true">localStorage saves</span>
-          <span class="chip chip-c mono" aria-hidden="true">1 file · game.js</span>
+          <span class="chip chip-c mono" aria-hidden="true">drag the city — it's 3D</span>
         </div>
       </div>
     </div>
@@ -337,6 +341,7 @@
 </div>
 
 <script src="main.js"></script>
+<script type="module" src="three-hero.js"></script>
 <script src="chat.js"></script>
 </body>
 </html>

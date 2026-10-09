@@ -120,6 +120,10 @@
   var DIRS = [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 }];
   var CAR_COLORS = ["#c8553d", "#5b8bd0", "#7fae6a", "#c9a227", "#9a6bbf", "#d0d4da", "#4fb0a5", "#8a4f6d"];
   var SKINS = ["#e6c9a8", "#c9a06f", "#8d6b4b", "#f0d9bf"];
+  // Realism phase 3 — visual-only silhouette variety, rolled per car and
+  // drawn by the sprite factory (assets.js BODIES). Purely cosmetic: only
+  // drawCarBody reads it, physics never sees it.
+  var CAR_BODIES = ["sedan", "sedan", "hatch", "van"]; // weighted: mostly sedans
 
   var cars = [], cops = [], peds = [], packages = [], weaponDrops = [];
   var skids = [], particles = [];
@@ -140,6 +144,53 @@
     }
   }
 
+  /* Realism phase 1 — visibility-aware witness. A ped only spots a crime
+     if (a) the player is roughly in the ped's heading cone (~120° total)
+     and (b) something solid isn't standing between ped and player (a cheap
+     ray walk sampling typeAtPx every 24 px, skipping BLDG/WATER). Vision
+     comes from DIRS[p.dir] — peds have no free heading — so the cone is
+     intentionally generous. Radius from the caller stays the outer bound
+     (cheap reject before the cone math). */
+  var SEE_CONE = 0.6; // ~±69° at the half-plane — generous but not omniscient
+  function blockedByBuilding(ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 24) return false;
+    var steps = Math.floor(dist / 24);
+    for (var i = 1; i < steps; i += 1) {
+      var tt = typeAtPx(ax + dx * (i / steps), ay + dy * (i / steps));
+      if (tt === BLDG || tt === WATER) return true;
+    }
+    return false;
+  }
+  function citizenCanSee(p, px, py, maxR) {
+    var dx = px - p.x, dy = py - p.y;
+    var d = dx * dx + dy * dy;
+    if (d >= maxR * maxR) return false;
+    var ang = Math.atan2(dy, dx);
+    if (angleDiff(ang, p.dir * Math.PI / 2) > SEE_CONE) return false;
+    return !blockedByBuilding(p.x, p.y, px, py);
+  }
+  /* First live ped (other than `exclude`) whose sight model catches the
+     crime at (px, py) — shared by the carjack, punch and shoot sites. */
+  function spotCrime(px, py, r, exclude) {
+    for (var i = 0; i < peds.length; i += 1) {
+      var w = peds[i];
+      if (w.dead || w === exclude) continue;
+      if (citizenCanSee(w, px, py, r)) return w;
+    }
+    return null;
+  }
+  function witnessReaction(w) {
+    panicNear(w.x, w.y, 80);
+    alertWitness(w.x, w.y);
+    if (settings.peaceful) return false;
+    wanted = Math.min(5, wanted + 1);
+    lastCrime = now();
+    say("Someone saw you! The police are on their way.");
+    return true;
+  }
+
   function makeCar(x, y, dir, parked) {
     return {
       x: x, y: y, a: dir * Math.PI / 2, dir: dir,
@@ -153,7 +204,8 @@
       // multiply the base constants in playerStep.
       accel: 0.85 + Math.random() * 0.3,
       topSpeed: 0.86 + Math.random() * 0.24,
-      gripMul: 0.82 + Math.random() * 0.38
+      gripMul: 0.82 + Math.random() * 0.38,
+      body: CAR_BODIES[Math.floor(Math.random() * CAR_BODIES.length)] // realism phase 3
     };
   }
   function spawnWorld() {
@@ -300,7 +352,8 @@
     drifter: "Drifter — 5km of skid marks.",
     mostWanted: "Most Wanted — survived 20s at 5 stars.",
     courier: "Courier — 5 deliveries completed.",
-    collector: "Collector — saved your first car to the garage."
+    collector: "Collector — saved your first car to the garage.",
+    brawler: "Brawler — threw your first punch."
   };
   function saveStats() { saveJSON(STATS_KEY, stats); }
   function unlockAch(id) {
@@ -349,6 +402,16 @@
     if (style.pts > stats.styleBest) { stats.styleBest = style.pts; saveStats(); }
     stylePops.push({ x: x, y: y, txt: "+" + pts + " " + label + (style.mult > 1 ? " ×" + style.mult : ""), life: 1.4 });
     if (stylePops.length > 6) stylePops.shift();
+  }
+  /* Realism phase 1 — witness feedback: a red "!" pop over the ped who
+     spotted the crime, riding the same rise+fade renderer as style pops
+     (warn flag → red instead of gold). One ping per spotted crime. */
+  function alertWitness(x, y) {
+    stylePops.push({ x: x, y: y - 18, txt: "!", life: 1.4, warn: true });
+    if (stylePops.length > 6) stylePops.shift();
+    // pan the grunt to where the witness stands on screen (−1..+1)
+    var pan = Math.max(-1, Math.min(1, ((x - cam.x) - view.w / 2) / (view.w / 2)));
+    sfxWitness(pan);
   }
   function stylePopsStep(dt) {
     for (var i = stylePops.length - 1; i >= 0; i -= 1) {
@@ -461,6 +524,28 @@
   var ticker = { msg: "Welcome to the local city. Borrow a car, grab the amber packages.", until: 6 };
   var cam = { x: player.x - 480, y: player.y - 270 };
   var camZoom = 1, zoomKick = 0;
+  var camA = 0; // realism phase 2 — target-lean rotation (radians, capped ±0.17)
+  // Nearest ped (or car/cop when none) within r of a point — feeds the
+  // camera's target-lean. Trivially cheap: ≤ ~90 entity distance checks,
+  // once per frame while on foot.
+  function nearestTarget(x, y, r) {
+    var best = null, bestD = r * r;
+    for (var i = 0; i < peds.length; i += 1) {
+      var p = peds[i], dx = p.x - x, dy = p.y - y, d = dx * dx + dy * dy;
+      if (!p.dead && d < bestD) { bestD = d; best = p; }
+    }
+    if (best) return best;
+    for (var j = 0; j < cops.length; j += 1) {
+      var c = cops[j], cdx = c.x - x, cdy = c.y - y, cd = cdx * cdx + cdy * cdy;
+      if (cd < bestD) { bestD = cd; best = c; }
+    }
+    if (best) return best;
+    for (var k = 0; k < cars.length; k += 1) {
+      var v = cars[k], vx = v.x - x, vy = v.y - y, vd = vx * vx + vy * vy;
+      if (!v.wrecked && vd < bestD) { bestD = vd; best = v; }
+    }
+    return best;
+  }
   var view = { w: 960, h: 540 };
   spawnWorld();
 
@@ -646,7 +731,7 @@
   // frame — never allocated inside the animation loop. The AudioContext
   // is created on the start-button gesture to satisfy autoplay policies.
   var audioCtx = null, masterGain = null;
-  var engineOsc = null, engineGain = null;
+  var engineOsc = null, engineGain = null, engineOsc2 = null, engineGain2 = null, engineFilter = null;
   var sirenOsc = null, sirenGain = null, sirenOn = false;
   var heliOsc = null, heliGain = null;
   var skidGain = null; // B7 — band-passed noise loop for tire screech
@@ -675,10 +760,33 @@
     engineOsc = audioCtx.createOscillator();
     engineOsc.type = "sawtooth";
     engineOsc.frequency.value = 60;
-    engineGain = audioCtx.createGain();
-    engineGain.gain.value = 0;
-    engineOsc.connect(engineGain).connect(masterGain);
+    // Realism phase 4 — lowpass on the engine chain: audioStep opens its
+    // cutoff with revs so the tone brightens on each gear shift instead of
+    // only rising in pitch.
+    engineFilter = audioCtx.createBiquadFilter ? audioCtx.createBiquadFilter() : null;
+    if (engineFilter) {
+      engineFilter.type = "lowpass";
+      engineFilter.frequency.value = 400;
+      engineGain = audioCtx.createGain();
+      engineGain.gain.value = 0;
+      engineOsc.connect(engineFilter).connect(engineGain).connect(masterGain);
+    } else {
+      engineGain = audioCtx.createGain();
+      engineGain.gain.value = 0;
+      engineOsc.connect(engineGain).connect(masterGain);
+    }
     engineOsc.start();
+    // Realism phase 4 — detuned second oscillator under the engine hum,
+    // driven with the same gear-band shape (audioStep mirrors the primary
+    // osc's frequency offset). Two slightly-out-of-phase saws read as an
+    // engine block rather than one tone.
+    engineOsc2 = audioCtx.createOscillator();
+    engineOsc2.type = "sawtooth";
+    engineOsc2.frequency.value = 63;
+    engineGain2 = audioCtx.createGain();
+    engineGain2.gain.value = 0;
+    engineOsc2.connect(engineGain2).connect(masterGain);
+    engineOsc2.start();
 
     sirenOsc = audioCtx.createOscillator();
     sirenOsc.type = "sine";
@@ -719,14 +827,23 @@
     skidSrc.connect(skidBand).connect(skidGain).connect(masterGain);
     skidSrc.start();
   }
-  function playTone(freq, dur, type, gainAmt) {
+  function playTone(freq, dur, type, gainAmt, pan) {
     if (!audioCtx || muted) return;
     var o = audioCtx.createOscillator();
     var g = audioCtx.createGain();
     o.type = type || "square";
     o.frequency.value = freq;
     g.gain.value = gainAmt || 0.5;
-    o.connect(g).connect(masterGain);
+    // Realism phase 4 — spatial SFX: stereo pan by screen-relative x
+    // (−1..+1) when the browser exposes StereoPannerNode; mono otherwise.
+    var dest = masterGain;
+    if (pan != null && audioCtx.createStereoPanner) {
+      var panner = audioCtx.createStereoPanner();
+      panner.pan.value = Math.max(-1, Math.min(1, pan));
+      g.connect(panner);
+      dest = panner;
+    }
+    o.connect(g).connect(dest);
     var t0 = audioCtx.currentTime;
     g.gain.setValueAtTime(g.gain.value, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
@@ -753,10 +870,12 @@
   function sfxEnter() { playTone(440, 0.08, "triangle", 0.3); }
   function sfxPunch() { playTone(160, 0.09, "square", 0.4); }
   function sfxHonk() { playTone(392, 0.13, "square", 0.12); playTone(398, 0.13, "square", 0.09); }
+  function sfxWitness(pan) { playTone(1040, 0.09, "square", 0.22, pan); playTone(880, 0.12, "square", 0.18, pan); }
   function audioStep(t) {
     if (!audioCtx) return;
     var wantEngine = player.inCar && !player.inCar.wrecked ? Math.min(1, Math.abs(player.inCar.speed) / 260) : 0;
     engineGain.gain.value += (wantEngine * 0.22 - engineGain.gain.value) * 0.15;
+    engineGain2.gain.value = engineGain.gain.value * 0.6;
     // B7 — gear steps instead of a pure linear pitch: rev up inside each
     // of three bands (split at 0.33/0.66 of top speed), drop back on the
     // shift, so the hum reads like a gearbox, not a synth sweep.
@@ -766,6 +885,10 @@
     var bandLo = gear * 0.33, bandHi = gear === 2 ? 1 : (gear + 1) * 0.33;
     var bandFrac = Math.max(0, Math.min(1, (frac - bandLo) / (bandHi - bandLo)));
     engineOsc.frequency.value = 55 + gear * 30 + bandFrac * 58;
+    // Realism phase 4 — detuned twin + revs-opened lowpass brighten the
+    // tone on each shift rather than just raising pitch.
+    engineOsc2.frequency.value = engineOsc.frequency.value * 1.007;
+    if (engineFilter) engineFilter.frequency.value = 400 + wantEngine * frac * 1400;
     heliGain.gain.value += ((heli ? 0.14 : 0) - heliGain.gain.value) * 0.15;
     // B7 — screech follows the skid-lay rate (lastSkidAt is stamped by
     // playerStep every frame a skid mark is laid).
@@ -773,7 +896,10 @@
     skidGain.gain.value += (wantScreech - skidGain.gain.value) * 0.25;
     var wantSiren = cops.length > 0 && busted <= 0;
     sirenGain.gain.value += ((wantSiren ? 0.18 : 0) - sirenGain.gain.value) * 0.2;
-    sirenOsc.frequency.value = Math.floor(t * 3) % 2 ? 880 : 660;
+    // Realism phase 4 — deeper, slower wail at 4–5 stars: same oscillator,
+    // pitch and tempo drop as the response escalates.
+    var hiStars = wanted >= 4;
+    sirenOsc.frequency.value = Math.floor(t * (hiStars ? 2 : 3)) % 2 ? (hiStars ? 640 : 880) : (hiStars ? 480 : 660);
   }
 
   /* ------------------------------------------------------- enter/exit */
@@ -842,17 +968,14 @@
     player.inCar = best;
     player.health = best.health;
     var seen = false;
-    for (var p = 0; p < peds.length; p += 1) {
-      var pd = peds[p];
-      if (pd.dead) continue;
-      var wx = pd.x - best.x, wy = pd.y - best.y;
-      if (wx * wx + wy * wy < 130 * 130) { seen = true; pd.panic = 2; break; }
-    }
-    if (seen) panicNear(best.x, best.y, 80);
-    if (seen && !settings.peaceful) {
-      wanted = Math.min(5, wanted + 1); lastCrime = now();
-      say("Someone saw that — locally. The police are coming.");
-    } else {
+    // Realism phase 1 — the witness radius widens only when the player is
+    // on screen; off-screen spots nearby keep the modest radius so a
+    // parking-lot jacking behind a building stays risky but fair.
+    var onScreen = inView(best.x - cam.x, best.y - cam.y, 40);
+    var witness = spotCrime(player.x, player.y, onScreen ? 160 : 110, null);
+    seen = !!witness;
+    if (seen) witnessReaction(witness);
+    if (!seen || settings.peaceful) {
       var flavor = best.accel > 1.05 ? " This one's got a tune."
         : best.gripMul < 0.95 ? " Floaty suspension."
         : best.topSpeed > 1.02 ? " Feels quick."
@@ -896,7 +1019,7 @@
     player.punchCd = 0.4;
     player.punchAnim = 0.15;
     sfxPunch();
-    var reach = 34, arc = 0.9, hit = false;
+    var reach = 34, arc = 0.9, hit = false, pedHit = false;
     for (var i = 0; i < peds.length; i += 1) {
       var p = peds[i];
       if (p.dead) continue;
@@ -904,7 +1027,7 @@
       if (Math.hypot(dx, dy) < reach && angleDiff(Math.atan2(dy, dx), player.a) < arc) {
         p.panic = Math.max(p.panic, 3);
         p.x += Math.cos(player.a) * 20; p.y += Math.sin(player.a) * 20;
-        hit = true;
+        hit = true; pedHit = true;
       }
     }
     for (var j = 0; j < cops.length; j += 1) {
@@ -923,6 +1046,17 @@
       stats.punches = (stats.punches || 0) + 1;
       saveStats();
       unlockAch("brawler");
+      // Realism phase 1 — shoving a civilian only turns criminal when
+      // someone (possibly the shove-order crowd, possibly a bystander)
+      // actually spots it; the officer site above stays unconditional
+      // because the cop is their own witness. Last on purpose: its say()
+      // is the more urgent of the two messages this block can fire, and
+      // the single-slot ticker keeps whichever ran latest.
+      if (pedHit && !settings.peaceful) {
+        var onScreen = inView(player.x - cam.x, player.y - cam.y, 40);
+        var w = spotCrime(player.x, player.y, onScreen ? 160 : 110, null);
+        if (w) witnessReaction(w);
+      }
     }
   }
 
@@ -984,6 +1118,13 @@
     }
     tracers.push({ x1: player.x + fx * 8, y1: player.y + fy * 8, x2: endX, y2: endY, life: 0.16 });
     if (tracers.length > 4) tracers.shift();
+    // Realism phase 1 — a wild shot only becomes a crime when a witness
+    // catches it; a lone shot into the wall of an empty alley stays quiet.
+    if (!hit && !settings.peaceful) {
+      var onScreen = inView(player.x - cam.x, player.y - cam.y, 40);
+      var w = spotCrime(player.x, player.y, onScreen ? 200 : 130, null);
+      if (w) witnessReaction(w);
+    }
   }
 
   /* ---------------------------------------------------------- traffic */
@@ -1089,6 +1230,7 @@
     var sp = p.panic > 0 ? 85 : (p.gawk ? 0 : p.speed);
     var nx = p.x + DIRS[p.dir].x * sp * dt;
     var ny = p.y + DIRS[p.dir].y * sp * dt;
+    if (sp > 0) p.moveA = Math.atan2(DIRS[p.dir].y, DIRS[p.dir].x); // realism phase 3 — true heading for sprite rotation
     if (typeAtPx(nx, ny) === SIDE) { p.x = nx; p.y = ny; }
     else {
       var opts = [];
@@ -1188,13 +1330,23 @@
         car.speed *= Math.max(0, 1 - 4 * dt);
       }
       var steer = inp.x * (keys[" "] ? 1.65 : 1) * 2.4 * dt;
-      steer *= Math.max(-1, Math.min(1, car.speed / 130));
+      // Realism phase 2 — inverted-U steering curve replaces the linear
+      // speed/130 scale: poor authority at a standstill and at full chat,
+      // crispest mid-corner where a car actually turns, like a real chassis.
+      var spdAbs = Math.abs(car.speed) / topSpeed;
+      var steerCurve = Math.sin(Math.min(1, spdAbs / 0.45) * Math.PI / 2) * (spdAbs > 0.55 ? 1 - 0.45 * ((spdAbs - 0.55) / 0.45) : 1);
+      steer *= steerCurve;
       car.a += steer;
 
+      // Realism phase 2 — throttle weight transfer: easing a ±1 "weight"
+      // value toward the pedal and letting it modulate grip a little means
+      // braking tucks the nose in and full throttle washes out slightly —
+      // a feel change only, no constant the drift/skid paths rely on.
+      car.weight = (car.weight || 0) + (throttle - (car.weight || 0)) * Math.min(1, 3 * dt);
       // A1 — weatherGrip is a JS-local multiplier (see the weather section):
       // rain loosens handling exactly where Unity's PlayerSys.Step applies
       // State.WeatherGrip, without touching any shared physics constant.
-      var grip = (keys[" "] ? 2.2 : 8) * car.gripMul * weatherGrip;
+      var grip = (keys[" "] ? 2.2 : 8) * car.gripMul * weatherGrip * (1 - 0.25 * Math.abs(car.weight));
       var fX = Math.cos(car.a), fY = Math.sin(car.a);
       var tvX = fX * car.speed, tvY = fY * car.speed;
       car.vx += (tvX - car.vx) * Math.min(1, grip * dt);
@@ -2262,16 +2414,22 @@
     ctx.restore();
   }
 
-  function drawCarBody(x, y, a, color, wrecked) {
+  function drawCarBody(x, y, a, color, wrecked, body) {
+    // Realism phase 3 — pre-rendered sprite path when marketing/assets.js
+    // is loaded; falls back to the old per-frame vector pass otherwise
+    // (headless test harness, file-less edge cases). Same transform origin
+    // and visual footprint either way, so collision circles don't move.
+    var sp = window.LTA_SPRITES && window.LTA_SPRITES.car && window.LTA_SPRITES.car(color, body || "sedan", wrecked);
     ctx.save();
     ctx.translate(x, y); ctx.rotate(a);
+    if (sp) { ctx.drawImage(sp, -sp.width / 2, -sp.height / 2); ctx.restore(); return; }
+    var bodyCol = wrecked ? "#2b2b2b" : color; // vector fallback path
     ctx.fillStyle = "rgba(0,0,0,0.35)";
     ctx.beginPath(); ctx.ellipse(2, 4, 21, 12, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#0a0c10";
     ctx.fillRect(-16, -12.5, 8, 3.5); ctx.fillRect(-16, 9, 8, 3.5);
     ctx.fillRect(9, -12.5, 8, 3.5); ctx.fillRect(9, 9, 8, 3.5);
-    var body = wrecked ? "#2b2b2b" : color;
-    ctx.fillStyle = body;
+    ctx.fillStyle = bodyCol;
     if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-20, -11, 40, 22, 5); ctx.fill(); }
     else ctx.fillRect(-20, -11, 40, 22);
     // specular sheen across the body
@@ -2298,7 +2456,7 @@
     var x = c.x - cam.x, y = c.y - cam.y;
     if (!inView(x, y, 140)) return;
     if (!c.parked) drawLights(x, y, c.a, c.brake);
-    drawCarBody(x, y, c.a, c.color, c.wrecked);
+    drawCarBody(x, y, c.a, c.color, c.wrecked, c.body);
     if (c.roadblock) {
       ctx.save();
       ctx.translate(x, y); ctx.rotate(c.a);
@@ -2380,6 +2538,18 @@
     ctx.fillStyle = "#20242c";
     ctx.beginPath(); ctx.arc(x + step, y + 5, 2.4, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(x - step, y + 5, 2.4, 0, Math.PI * 2); ctx.fill();
+    // Realism phase 3 — sprite path when marketing/assets.js is loaded:
+    // the ped now actually rotates to its last-move heading (p.moveA,
+    // tracked in pedStep) instead of always face-down. Falls back to the
+    // original vector pass when the sprite factory is absent.
+    var sp = window.LTA_SPRITES && window.LTA_SPRITES.ped && window.LTA_SPRITES.ped(p.shirt, SKINS[p.skin]);
+    if (sp) {
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(p.moveA || 0);
+      ctx.drawImage(sp, -sp.width / 2, -sp.height / 2);
+      ctx.restore();
+      return;
+    }
     ctx.fillStyle = p.shirt;
     ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = SKINS[p.skin];
@@ -2414,10 +2584,21 @@
     ctx.beginPath(); ctx.arc(x - step, y + 5, 2.4, 0, Math.PI * 2); ctx.fill();
     // A4 — the player's on-foot ped wears the pause-menu picks (persisted
     // as settings.skin/settings.shirt); NPCs keep their random rolls.
-    ctx.fillStyle = SHIRT_CHOICES[settings.shirt];
-    ctx.beginPath(); ctx.arc(x, y, 7.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = SKINS[settings.skin];
-    ctx.beginPath(); ctx.arc(x + Math.cos(player.a) * 2, y + Math.sin(player.a) * 2 - 1, 3.4, 0, Math.PI * 2); ctx.fill();
+    // Realism phase 3 — sprite path, rotated to the player's actual facing
+    // angle (free-angle, unlike peds' cardinal headings).
+    var sp = window.LTA_SPRITES && window.LTA_SPRITES.ped &&
+      window.LTA_SPRITES.ped(SHIRT_CHOICES[settings.shirt], SKINS[settings.skin]);
+    if (sp) {
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(player.a + Math.PI / 2);
+      ctx.drawImage(sp, -sp.width / 2, -sp.height / 2);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = SHIRT_CHOICES[settings.shirt];
+      ctx.beginPath(); ctx.arc(x, y, 7.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = SKINS[settings.skin];
+      ctx.beginPath(); ctx.arc(x + Math.cos(player.a) * 2, y + Math.sin(player.a) * 2 - 1, 3.4, 0, Math.PI * 2); ctx.fill();
+    }
     if (player.punchAnim > 0) {
       var reach = player.weapon === "bat" ? 22 : 14;
       ctx.strokeStyle = player.weapon === "bat" ? "rgba(200,160,90,0.9)" : "rgba(255,224,180,0.9)";
@@ -2549,8 +2730,13 @@
       var x = view.w / 2 + (sx - view.w / 2) * camZoom;
       var y = view.h / 2 + (sy - view.h / 2) * camZoom - (1.4 - p.life) * 30;
       if (!inView(x, y, 60)) continue;
-      ctx.fillStyle = "rgba(255,178,36," + Math.min(1, Math.max(0, p.life)).toFixed(2) + ")";
+      // warn pops (phase 1 witness alert) are red and bolder than the
+      // gold style bonuses so a spotted crime reads at a glance.
+      var alpha = Math.min(1, Math.max(0, p.life)).toFixed(2);
+      ctx.fillStyle = p.warn ? "rgba(255,74,64," + alpha + ")" : "rgba(255,178,36," + alpha + ")";
+      if (p.warn) ctx.font = "bold 16px 'IBM Plex Mono', monospace";
       ctx.fillText(p.txt, x, y);
+      if (p.warn) ctx.font = "12px 'IBM Plex Mono', monospace";
     }
     ctx.textAlign = "left";
   }
@@ -2568,6 +2754,21 @@
       // dawn/dusk wash: a soft warm tint that never overpowers the neon
       // night look — see the dayAmt note above spawnWorld().
       ctx.fillStyle = "rgba(255,196,140," + (dayAmt * 0.10).toFixed(3) + ")";
+      ctx.fillRect(0, 0, view.w, view.h);
+    }
+    // Realism phase 4 — stealth-detected pulse: a brief red rim-breathe on
+    // the vignette right after a witnessed crime, so the alert registers
+    // even if the "!" pop is off-screen (player in a car, for example).
+    var sinceCrime = now() - lastCrime;
+    if (started && !settings.peaceful && sinceCrime < 0.8 && wanted > 0) {
+      var pulse = (1 - sinceCrime / 0.8) * 0.16;
+      var rg = ctx.createRadialGradient(
+        view.w / 2, view.h / 2, Math.min(view.w, view.h) * 0.30,
+        view.w / 2, view.h / 2, Math.max(view.w, view.h) * 0.66
+      );
+      rg.addColorStop(0, "rgba(255,74,64,0)");
+      rg.addColorStop(1, "rgba(255,74,64," + pulse.toFixed(3) + ")");
+      ctx.fillStyle = rg;
       ctx.fillRect(0, 0, view.w, view.h);
     }
   }
@@ -2613,7 +2814,13 @@
     ctx.textAlign = "left";
     ctx.font = "18px 'IBM Plex Mono', monospace";
     for (var i = 0; i < 5; i += 1) {
-      ctx.fillStyle = i < wanted ? "#ffb224" : "rgba(255,255,255,0.16)";
+      var starFill = i < wanted ? "#ffb224" : "rgba(255,255,255,0.16)";
+      // Realism phase 4 — fresh-alert flash: the top earned star blinks
+      // hard for 1.2s after any witnessed crime, then settles.
+      if (i === wanted - 1 && now() - lastCrime < 1.2) {
+        starFill = Math.floor(now() * 8) % 2 ? "#ff5252" : "#ffb224";
+      }
+      ctx.fillStyle = starFill;
       ctx.fillText("★", 16 + i * 22, 14);
     }
     ctx.fillStyle = "#e9edf4";
@@ -2788,12 +2995,44 @@
     }
     audioStep(t);
 
-    var lookX = player.x + player.vx * 0.22;
-    var lookY = player.y + player.vy * 0.22;
+    // Realism phase 2 — steering-weighted camera. The lookahead multiplier
+    // grows with speed (heavier at pace, exact at rest) and biases toward
+    // the steering direction while turning fast, so the car feels like it
+    // has inertia instead of orbiting the camera's dead center.
+    var lookMul = player.inCar ? 0.22 + Math.min(1, Math.abs(player.inCar.speed) / 280) * 0.16 : 0.22;
+    var lookX = player.x + player.vx * lookMul;
+    var lookY = player.y + player.vy * lookMul;
+    if (player.inCar && Math.abs(player.inCar.speed) > 120) {
+      // peek into the turn: nudge the aim point ~40px toward the car's
+      // steering side, eased per frame so it never snaps.
+      var carAim = player.inCar;
+      var peek = axisInput().x * 40;
+      lookX += Math.cos(carAim.a + Math.PI / 2) * peek;
+      lookY += Math.sin(carAim.a + Math.PI / 2) * peek;
+    }
     cam.x += (lookX - view.w / 2 - cam.x) * Math.min(1, 5 * dt);
     cam.y += (lookY - view.h / 2 - cam.y) * Math.min(1, 5 * dt);
     cam.x = Math.max(0, Math.min(WORLD * TILE - view.w, cam.x));
     cam.y = Math.max(0, Math.min(WORLD * TILE - view.h, cam.y));
+
+    // Realism phase 2 — target-lean rotation: while on foot (or parked),
+    // the camera drifts up to ±10° toward the nearest ped/car/cop so the
+    // world subtly orients on whatever the player might act on. Lerped,
+    // never snapped; drawn only inside the world transform so HUD and
+    // minimap stay level.
+    var camATarget = 0;
+    if (!player.inCar) {
+      var near = nearestTarget(player.x, player.y, 300);
+      if (near) {
+        var at = Math.atan2(near.y - player.y, near.x - player.x);
+        var cut = at - player.a;
+        while (cut > Math.PI) cut -= Math.PI * 2;
+        while (cut < -Math.PI) cut += Math.PI * 2;
+        camATarget = Math.max(-0.17, Math.min(0.17, cut * 0.35));
+      }
+    }
+    camA += (camATarget - camA) * Math.min(1, 2.5 * dt);
+    if (Math.abs(camA) < 0.002) camA = 0;
 
     var speedFrac = (player.inCar && !player.inCar.wrecked) ? Math.min(1, Math.abs(player.inCar.speed) / 280) : 0;
     var zoomTarget = 1 - speedFrac * 0.08 - zoomKick;
@@ -2803,6 +3042,14 @@
     ctx.fillRect(0, 0, view.w, view.h);
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    if (camA !== 0) {
+      // target-lean rotation wraps the existing cam-relative draws: turn
+      // the whole world a few degrees around the screen center, then undo
+      // before HUD/vignette run (they sit after ctx.restore()).
+      ctx.translate(view.w / 2, view.h / 2);
+      ctx.rotate(camA);
+      ctx.translate(-view.w / 2, -view.h / 2);
+    }
     if (camZoom !== 1) {
       ctx.translate(view.w / 2, view.h / 2);
       ctx.scale(camZoom, camZoom);
