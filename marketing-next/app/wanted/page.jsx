@@ -92,7 +92,7 @@ const HTML = `
     <div class="wrap closing-wrap">
       <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>the sirens are close</p>
       <h2 id="close-h" class="display closing-h reveal">Lose them.<br><span class="grad">Locally.</span></h2>
-      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <a class="nav-cta cta-big reveal" href="/game">▶ Play Local Theft Auto</a>
       <p class="closing-note mono reveal">0–5 stars · roadblocks at 3 · a helicopter at 4</p>
     </div>
   </section>

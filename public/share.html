@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shared chat — Ollama Chat</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f0a72c' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18'/%3E%3Cpath d='M7 9l3 3-3 3M13 15h4'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app" class="share-app">
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title" id="shareTitle">Shared chat</div>
+        <div class="topbar-actions">
+          <a class="btn btn-ghost" href="/">Open Ollama Chat</a>
+        </div>
+      </header>
+      <section id="shareMessages" class="messages"><div class="muted" style="padding:16px">Loading…</div></section>
+    </main>
+  </div>
+  <script src="chat-helpers.js"></script>
+  <script>
+    (async () => {
+      const token = new URLSearchParams(location.search).get('token') || '';
+      const container = document.getElementById('shareMessages');
+      const title = document.getElementById('shareTitle');
+      const { renderMarkdown } = window.ChatHelpers;
+      try {
+        const res = await fetch(`/api/share/${encodeURIComponent(token)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+        title.textContent = data.title || 'Shared chat';
+        container.innerHTML = '';
+        if (!Array.isArray(data.messages) || !data.messages.length) {
+          container.textContent = 'This shared chat is empty.';
+          return;
+        }
+        for (const msg of data.messages) {
+          const row = document.createElement('div');
+          row.className = 'msg-row ' + (msg.role === 'user' ? 'user' : 'assistant');
+          const body = document.createElement('div');
+          body.className = 'msg-body';
+          const role = document.createElement('div');
+          role.className = 'msg-role';
+          role.textContent = msg.role === 'user' ? 'You' : (msg.model || 'Assistant');
+          const content = document.createElement('div');
+          content.className = 'msg-content';
+          content.innerHTML = renderMarkdown(msg.content || '');
+          body.appendChild(role);
+          body.appendChild(content);
+          row.appendChild(body);
+          container.appendChild(row);
+        }
+      } catch (err) {
+        title.textContent = 'Shared chat';
+        container.textContent = err.message;
+      }
+    })();
+  </script>
+</body>
+</html>

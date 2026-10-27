@@ -152,7 +152,7 @@ const HTML = `
       <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>two projects, one repo</p>
       <h2 id="close-h" class="display closing-h reveal">Chat with a model.<br><span class="grad">Or go steal a car.</span></h2>
       <div class="cta-row" style="justify-content: center;">
-        <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+        <a class="nav-cta cta-big reveal" href="/game">▶ Play Local Theft Auto</a>
       </div>
       <p class="closing-note mono reveal">github.com — one repository, two front doors</p>
     </div>

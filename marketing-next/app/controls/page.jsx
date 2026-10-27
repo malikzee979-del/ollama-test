@@ -70,7 +70,7 @@ const HTML = `
         <h2 id="touch-h" class="display">On a phone or tablet? <span class="grad">The pads show up on their own.</span></h2>
         <p>Any coarse-pointer device automatically gets a D-pad on the left for movement and action buttons on the right — accelerate, steer, brake, handbrake, enter/exit, and punch. No separate mobile build, no app store; the same file adapts.</p>
       </div>
-      <a class="ghost-link" href="game.html">Try it on your phone <span aria-hidden="true">→</span></a>
+      <a class="ghost-link" href="/game">Try it on your phone <span aria-hidden="true">→</span></a>
     </div>
   </section>
 
@@ -100,7 +100,7 @@ const HTML = `
     <div class="wrap closing-wrap">
       <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>your hands, your rules</p>
       <h2 id="close-h" class="display closing-h reveal">Pick your setup.<br><span class="grad">Start driving.</span></h2>
-      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <a class="nav-cta cta-big reveal" href="/game">▶ Play Local Theft Auto</a>
       <p class="closing-note mono reveal">Keyboard or touch · three difficulty knobs · one mute key</p>
     </div>
   </section>

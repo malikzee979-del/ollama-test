@@ -31,7 +31,8 @@ namespace LocalTheftAuto
             c.Parked = parked;
             c.Health = 100f;
             // Realism pass (Phase 3): seed the body type ONCE so the mesh
-            // (BuildCar seed%3) and physics (CarEnt.BodyType) always agree.
+            // (BuildCar's seed branch — Slice 3: 6 branches, same map) and
+            // physics (CarEnt.BodyType) always agree.
             c.Seed = Random.Range(0, int.MaxValue);
             return c;
         }
@@ -93,6 +94,17 @@ namespace LocalTheftAuto
             for (int g = 0; g < turfs; g++)
             {
                 Vector2 turf = CityMap.TileCenter(CityMap.RandTileOf(Cfg.Side, Cfg.Park));
+                // record this turf so TurfStep can pay for clearing/holding it.
+                // Identity is the block corner it was planted on; the crew is
+                // the next four peds we append below.
+                TurfEnt turfEnt = new TurfEnt
+                {
+                    X = turf.x, Y = turf.y,
+                    Bx = Mathf.FloorToInt(turf.x / Cfg.Tile) / Cfg.BlockTiles,
+                    By = Mathf.FloorToInt(turf.y / Cfg.Tile) / Cfg.BlockTiles,
+                    LastDrip = -1e9
+                };
+                int crewStart = d.Peds.Count;
                 for (int k = 0; k < 4; k++)
                 {
                     int gang = k % 2;
@@ -117,6 +129,12 @@ namespace LocalTheftAuto
                         StrideMult = Random.Range(Cfg.PedStrideMultMin, Cfg.PedStrideMultMax)
                     });
                 }
+                // the four we just added are this turf's crew (indices are
+                // stable for the whole frame — nothing removes peds mid-list)
+                int[] idx = new int[4];
+                for (int k = 0; k < 4; k++) idx[k] = crewStart + k;
+                turfEnt.GangsterIdx = idx;
+                d.Turfs.Add(turfEnt);
             }
 
             for (int i = 0; i < Cfg.PackageCount; i++)
@@ -169,7 +187,8 @@ namespace LocalTheftAuto
 
         static LaneTarget LaneTargets(CarEnt c) { return LaneTargets(c.X, c.Y, c.Dir); }
 
-        static bool ProbeAhead(GameData d, CarEnt c, float dist)
+        // public: VehicleWreckSimTest pins the "traffic brakes for wrecks" contract
+        public static bool ProbeAhead(GameData d, CarEnt c, float dist)
         {
             float px = c.X + Cfg.Dx[c.Dir] * dist, py = c.Y + Cfg.Dy[c.Dir] * dist;
             // spatial hash: this used to scan every car in the city for every
@@ -803,6 +822,14 @@ namespace LocalTheftAuto
             // respawned; there is nothing to pursue and nobody to arrest)
             if (s.Busted <= 0f && s.Wasted <= 0f)
             {
+                // F19: time survived at 5★. The JS lawStep keys this off the
+                // same game clock (`stats.fiveStarSeconds += dt` while
+                // wanted >= 5) and unlocks mostWanted past 20s. dt here is
+                // simDt, so a pause freezes the tally (correct — a paused
+                // player isn't "surviving" anything).
+                if (s.Wanted >= 5 && dt > 0f)
+                    StatsSys.AccumulateFiveStar(dt);
+
                 if (s.Wanted > 0 && t - s.LastCrime > 7.0 && t - s.LastDecay > 4.0)
                 {
                     s.LastDecay = t;
@@ -1086,6 +1113,9 @@ namespace LocalTheftAuto
 
             p.GarageDone = true;   // one save per visit — drive off and back to re-save
             GarageStored = true;
+            // F19 slice: lifetime garage-save counter + Collector achievement.
+            StatsSys.GarageSaves();
+            StatsSys.Unlock("collector");
             // snapshot the build now — this car object won't survive the run.
             // Stats are fully derived from the body type at drive time (see
             // PlayerSys.Step), so only identity needs storing: body, paint,
@@ -1217,6 +1247,9 @@ namespace LocalTheftAuto
             if (t - p.LastFireAt < Cfg.WeaponCooldown[wi]) return;
             p.LastFireAt = t;
             p.Ammo--;
+            // F19 slice: lifetime shots counter + Brawler achievement.
+            StatsSys.Shots();
+            StatsSys.Unlock("brawler");
 
             AddSparks(d, p.X + Mathf.Cos(p.A) * 14f, p.Y + Mathf.Sin(p.A) * 14f, 4);
 
@@ -1378,6 +1411,81 @@ namespace LocalTheftAuto
             }
         }
 
+        /* ------------------------------------------------ turf economics */
+
+        // Per-turf economy, driven every frame from GameLoop (sim clock).
+        // Two independent rewards, both read-only against the existing
+        // gangster pipeline (we only read Dead, never mutate the peds):
+        //   1. CLEAR — when every gangster on a turf has died the first time,
+        //      pay a lump and (optionally) drop one crate on the corner.
+        //      Cleared latches until the crew respawns (RespawnDeadPeds
+        //      revives them), at which point the turf re-arms.
+        //   2. HOLD — while the player stands inside a CLEARED turf, pay a
+        //      drip every TurfHoldInterval of sim time.
+        // No turf is ever cleared without its gangsters having died, and the
+        // lump/drip are mutually exclusive per tick (clear pays once, hold
+        // only after the clear is already banked).
+        public static void TurfStep(GameData d, double t, float dt)
+        {
+            var s = d.State;
+            float px = d.Player.X, py = d.Player.Y;
+            float holdR2 = Cfg.TurfHoldRadius * Cfg.TurfHoldRadius;
+
+            for (int i = 0; i < d.Turfs.Count; i++)
+            {
+                TurfEnt turf = d.Turfs[i];
+                int[] idx = turf.GangsterIdx;
+                if (idx == null || idx.Length == 0) continue;
+
+                // how many of this turf's crew are still alive?
+                int alive = 0;
+                for (int k = 0; k < idx.Length; k++)
+                {
+                    if (!d.Peds[idx[k]].Dead) alive++;
+                }
+
+                // Contested again (crew respawned) — re-arm for the next wipe.
+                // "Cleared" is effectively "all dead right now", so a turf
+                // stops paying the hold drip the moment the crew comes back.
+                if (alive > 0)
+                {
+                    turf.Cleared = false;
+                    turf.CrateDropped = false;
+                    continue;
+                }
+
+                // The whole crew is down. Bank the wipe exactly once.
+                if (!turf.Cleared)
+                {
+                    turf.Cleared = true;
+                    turf.LastDrip = t;   // hold cadence starts now, not from the -1e9 sentinel
+                    s.Score += Cfg.TurfClearScore;
+                    s.Say("Corner cleared. +" + Cfg.TurfClearScore + ".");
+                    if (Cfg.TurfDropCrate)
+                    {
+                        d.Weapons.Add(new WeaponEnt
+                        {
+                            X = turf.X, Y = turf.Y,
+                            Phase = Random.value * 6.28f,
+                            Gun = Cfg.CrateSmg   // the premium reward for the work
+                        });
+                        turf.CrateDropped = true;
+                    }
+                    continue; // no hold-drip in the same tick the lump landed
+                }
+
+                // Holding a cleared turf pays a drip, throttled on the sim clock.
+                float dx = px - turf.X, dy = py - turf.Y;
+                bool inside = dx * dx + dy * dy < holdR2;
+                if (inside && t - turf.LastDrip >= Cfg.TurfHoldInterval)
+                {
+                    turf.LastDrip = t;
+                    s.Score += Cfg.TurfHoldScore;
+                    s.Say("Holding the corner. +" + Cfg.TurfHoldScore + ".");
+                }
+            }
+        }
+
         /* ---------------------------------------------------- effects */
 
         public static void AddSparks(GameData d, float x, float y, int n)
@@ -1477,6 +1585,7 @@ namespace LocalTheftAuto
             if (p.Health <= 0f && p.InCar != null && !p.InCar.Wrecked)
             {
                 p.InCar.Wrecked = true;
+                p.InCar.WreckedAt = d.State.Time;
                 d.State.Say("The car is done. On foot from here.");
             }
         }
@@ -1491,6 +1600,28 @@ namespace LocalTheftAuto
                 s.RampageCount++;
                 if (s.RampageCount < s.RampageGoal)
                     s.Say("Wrecked " + s.RampageCount + "/" + s.RampageGoal + ".");
+            }
+        }
+
+        // Slice 3 (H): wreckage lifecycle. Wrecked traffic cars age out of
+        // the world after Cfg.WreckLinger and smoke while the player is
+        // within Cfg.WreckSmokeRadius. Traffic braking for wrecks already
+        // happens in ProbeAhead (wrecks are query hits that aren't parked).
+        public static void WreckStep(GameData d, float dt)
+        {
+            var s = d.State;
+            for (int i = d.Cars.Count - 1; i >= 0; i--)
+            {
+                CarEnt c = d.Cars[i];
+                if (!c.Wrecked || c.IsPlayer || c.WreckedAt < 0) continue;
+                if (s.Time - c.WreckedAt > Cfg.WreckLinger)
+                {
+                    d.Cars.RemoveAt(i);
+                    continue;
+                }
+                float dx = c.X - d.Player.X, dy = c.Y - d.Player.Y;
+                if (dx * dx + dy * dy > Cfg.WreckSmokeRadius * Cfg.WreckSmokeRadius) continue;
+                if (Random.value < Cfg.WreckSmokeRate * dt) AddSmoke(d, c.X, c.Y);
             }
         }
 

@@ -36,6 +36,7 @@ namespace LocalTheftAuto
         Light sun;                   // real directional sun (see UpdateWorldFX)
         CityRenderer city;
         Hud hud;
+        NpcBridge npcBridge;          // optional local AI NPC dialogue (F19)
 
         PedVisual playerVis;
 
@@ -136,7 +137,7 @@ namespace LocalTheftAuto
 
         void Awake()
         {
-            if (FindObjectsByType<GameLoop>().Length > 1)
+            if (FindObjectsByType<GameLoop>(FindObjectsSortMode.None).Length > 1)
             {
                 Destroy(gameObject);
                 return;
@@ -147,6 +148,12 @@ namespace LocalTheftAuto
 
         static GameLoop active;
         public static GameLoop Active { get { return active; } }
+
+        // Read by the stats/combo system (LTA.Stats.cs) and the HUD: the live
+        // game data and the current sim clock. SimTime is what the combo keys
+        // off, so a pause (GameState.Time frozen) freezes the combo.
+        public GameData Data { get { return data; } }
+        public double SimTime { get { return data != null ? data.State.Time : 0.0; } }
 
         // re-tints the on-foot player mesh after a start-screen cosmetic
         // pick (LTA.Hud.cs) — cheap, since MeshKit.Tint is just a
@@ -173,6 +180,8 @@ namespace LocalTheftAuto
             Systems.SpawnWorld(data);
             Systems.SpawnGarageCar(data);   // T16: the owned ride waits near start
             LoadGame(data);                 // after load, so the save's garage snapshot rules the spawn
+            StatsSys.Load();                // F19 slice: lifetime stats/achievements (separate key)
+            StatsSys.ResetRun();            // per-run combo/style accumulator starts clean
 
             var camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
@@ -289,6 +298,7 @@ namespace LocalTheftAuto
 
             GameAudio.Init(data);
             Audio3D.Init(data);
+            npcBridge = new NpcBridge();   // F19: disabled unless a token is set
             StartCoroutine(AutoSaveLoop());
 
             // headless-ish visual verification: -lta-shot=/abs/path.png
@@ -829,7 +839,8 @@ namespace LocalTheftAuto
             Systems.GarageStored = sd.hasGarageCar;
             if (sd.hasGarageCar)
             {
-                Systems.gBody = Mathf.Clamp(sd.gBody, 0, 3);
+                // Slice 3: vehicle bodies extended to 6 (truck=4, sports=5)
+                Systems.gBody = Mathf.Clamp(sd.gBody, 0, 5);
                 Systems.gR = sd.gR; Systems.gG = sd.gG; Systems.gB = sd.gB;
                 Systems.gHealth = Mathf.Clamp(sd.gHealth, 20f, 100f);
             }
@@ -874,6 +885,7 @@ namespace LocalTheftAuto
         {
             SaveGame();
             SettingsStore.Save();   // settings persist independently of run state
+            StatsSys.Save();        // F19 slice: stats persist independently of run state
         }
 
         IEnumerator ShotRoutine()
@@ -1005,6 +1017,14 @@ namespace LocalTheftAuto
 
             if (s.Started)
             {
+                // F19: poll the AI NPC bridge once per frame. Gated on the
+                // same "started, not paused" condition the sim block uses so a
+                // paused game doesn't let a request time out behind the menu —
+                // but it uses real dt (like the camera/audio below) because
+                // UnityWebRequest ticks on real time, and the request is a
+                // presentation-side thing, not sim state.
+                if (!s.Paused) npcBridge.Step(dt);
+
                 if (s.Busted <= 0f && s.Wasted <= 0f && !s.Paused)
                 {
                     if (PlayerSys.EnterExitPressed()) PlayerSys.TryEnterExit(data);
@@ -1013,14 +1033,17 @@ namespace LocalTheftAuto
                     Systems.GasStationStep(data, simDt);   // T8: drive-in repair sink
                     Systems.GarageStep(data, simDt);       // T16: garage world trigger
                     for (int i = 0; i < data.Cars.Count; i++) Systems.TrafficStep(data, data.Cars[i], simDt);
+                    Systems.WreckStep(data, simDt);   // Slice 3 (H): wreckage linger + smoke
                     Systems.ExhaustStep(data, simDt, data.Player.X - 1000f, data.Player.Y - 800f, 2000f, 1600f);
                     Systems.SplashStep(data, simDt, data.Player.X - 1000f, data.Player.Y - 800f, 2000f, 1600f);
                     for (int j = 0; j < data.Peds.Count; j++) Systems.PedStep(data, data.Peds[j], simDt);
                     Systems.RespawnDeadPeds(data);
                     Systems.PickupStep(data);
                     Systems.WeaponPickupStep(data);
+                    Systems.TurfStep(data, t, simDt);   // turf economics: clear lump + hold drip (sim clock)
                     Systems.WeatherStep(data, t);
                     MissionSys.Step(data, t);
+                    MissionSys.VipStep(data, t, simDt);   // escort: VIP pickup/follow (sim clock)
                     Systems.ParticlesStep(data, simDt);
                 }
                 // LawStep stays OUTSIDE the gate (its own comment explains
@@ -1097,6 +1120,7 @@ namespace LocalTheftAuto
         {
             PlayerPrefs.DeleteKey(SaveKey);
             StopAllCoroutines();          // the old AutoSaveLoop; InitGame starts a fresh one
+            StatsSys.ResetRun();          // F19 slice: new run, clean combo/style accumulator
             GameAudio.Reset();
             Audio3D.Reset();              // T12: proper reset inside Audio3D itself
             RecoverFromDomainReload();
@@ -1359,6 +1383,12 @@ namespace LocalTheftAuto
 
                 if (p.Dead)
                 {
+                    // tint every mesh, not just torso/head — limbs are
+                    // separate renderers with their own vertex colors, and
+                    // leaving them colored made a body read as a glitched
+                    // mannequin rather than a dead ped
+                    var renderers = v.Root.GetComponentsInChildren<MeshRenderer>();
+                    for (int r = 0; r < renderers.Length; r++) MeshKit.Tint(renderers[r], DeadTint);
                     if (p.FlingT > 0f)
                     {
                         // brief airborne arc right after impact — tumbling,
@@ -1367,16 +1397,12 @@ namespace LocalTheftAuto
                         v.Root.transform.position = MeshKit.V3(p.X, p.Y, lift);
                         v.Root.transform.rotation = Quaternion.Euler(70f * (1f - p.FlingT / 0.35f), 0f, 0f);
                         v.Root.transform.localScale = Vector3.one;
-                        MeshKit.Tint(v.Body, DeadTint);
-                        MeshKit.Tint(v.Head, DeadTint);
                         continue;
                     }
                     // squashed flat + gray, reads as a body on the pavement
                     v.Root.transform.position = MeshKit.V3(p.X, p.Y, 0f);
                     v.Root.transform.rotation = Quaternion.identity;
                     v.Root.transform.localScale = new Vector3(1.25f, 0.16f, 1.25f);
-                    MeshKit.Tint(v.Body, DeadTint);
-                    MeshKit.Tint(v.Head, DeadTint);
                 }
                 else
                 {
@@ -1475,21 +1501,23 @@ namespace LocalTheftAuto
         void SyncMission(float t)
         {
             var s = data.State;
-            bool showMarker = s.MissionOn
-                && s.MissionKind != MissionKind.Rampage
-                && s.MissionKind != MissionKind.GangWar;
+            // Slice 2: the marker follows the LIVE target (the ram car as it
+            // drives, the VIP until pickup) — MissionTarget is the single
+            // dispatch point, same contract as the JS missionTargetPos.
+            Vector2 mTarget;
+            bool showMarker = MissionSys.MissionTarget(data, out mTarget);
             missionGo.SetActive(showMarker);
             if (showMarker)
             {
-                missionGo.transform.position = MeshKit.V3(s.MissionX, s.MissionY, 0f);
+                missionGo.transform.position = MeshKit.V3(mTarget.x, mTarget.y, 0f);
                 // T15: board stands a fixed offset off the marker so it never
                 // hides the beam; yaws to face the camera like a rooftop sign
-                float boardAng = Mathf.Atan2(data.Player.Y - s.MissionY, data.Player.X - s.MissionX);
+                float boardAng = Mathf.Atan2(data.Player.Y - mTarget.y, data.Player.X - mTarget.x);
                 float boardDist = Cfg.Tile * 0.9f;
                 missionBoard.SetActive(true);
                 missionBoard.transform.position = MeshKit.V3(
-                    s.MissionX + Mathf.Cos(boardAng) * boardDist,
-                    s.MissionY + Mathf.Sin(boardAng) * boardDist, 0f);
+                    mTarget.x + Mathf.Cos(boardAng) * boardDist,
+                    mTarget.y + Mathf.Sin(boardAng) * boardDist, 0f);
                 missionBoard.transform.rotation = Quaternion.Euler(0f, t * 30f, 0f);
                 float pulse = 0.55f + 0.45f * Mathf.Sin(t * 4f);
                 missionBoardGlow.color = new Color(MissionBlue.r, MissionBlue.g, MissionBlue.b, 0.32f * pulse);

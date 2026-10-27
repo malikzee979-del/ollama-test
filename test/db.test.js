@@ -206,3 +206,67 @@ test("exportSessions returns full own sessions and never another user's", () => 
   const full = db.getSession(a.id, 'user-a');
   assert.deepStrictEqual(out[0], full, 'export carries the full session object, not a summary');
 });
+
+// --- Session cleanup (Phase 7.18) --------------------------------------------
+
+test('cleanupPreview lists own stale sessions as summaries, never another user\u2019s', () => {
+  // Cutoff strictly between the two creations (millisecond timestamps), so
+  // "old" and "fresh" are unambiguous rather than both being older than a
+  // future cutoff.
+  const old = db.createSession('cleanup-user', 'ancient');
+  sleepSync(15);
+  const cutoff = new Date().toISOString();
+  sleepSync(15);
+  const fresh = db.createSession('cleanup-user', 'brand new');
+  const otherUser = db.createSession('cleanup-other', 'other user\u2019s ancient chat');
+
+  const preview = db.cleanupPreview('cleanup-user', cutoff);
+
+  assert.ok(preview.some((s) => s.id === old.id));
+  assert.ok(!preview.some((s) => s.id === fresh.id), 'fresh session must not be flagged');
+  assert.ok(!preview.some((s) => s.id === otherUser.id), 'another user\u2019s session must never appear');
+  assert.ok(preview.every((s) => !('messages' in s)), 'previews are summaries, not full sessions');
+});
+
+test('deleteSessionsOlderThan removes only own stale sessions and returns the count', () => {
+  // Timestamps are millisecond ISO strings, so the cutoff has to sit
+  // strictly between two created sessions: create stale, let the clock
+  // advance, stamp the cutoff, let it advance again, then create "keep".
+  const stale = db.createSession('cleanup-user2', 'stale');
+  sleepSync(15);
+  const cutoff = new Date().toISOString();
+  sleepSync(15);
+  const keep = db.createSession('cleanup-user2', 'keep');
+  const others = db.createSession('cleanup-other2', 'other user\u2019s stale');
+  assert.notEqual(stale.updatedAt < cutoff, false, 'precondition: stale predates the cutoff');
+  assert.ok(new Date(keep.updatedAt) > new Date(cutoff), 'precondition: keep postdates the cutoff');
+
+  const deleted = db.deleteSessionsOlderThan('cleanup-user2', cutoff);
+
+  assert.equal(deleted, 1);
+  assert.equal(db.getSession(stale.id, 'cleanup-user2'), undefined);
+  assert.ok(db.getSession(keep.id, 'cleanup-user2'), 'fresh session survives');
+  assert.ok(db.getSession(others.id, 'cleanup-other2'), 'other user\u2019s session survives');
+});
+
+test('cleanup functions treat a garbage cutoff as "nothing matches"', () => {
+  db.createSession('cleanup-user3', 'anything');
+  assert.deepEqual(db.cleanupPreview('cleanup-user3', 'not-a-date'), []);
+  assert.equal(db.deleteSessionsOlderThan('cleanup-user3', 'not-a-date'), 0);
+});
+
+// --- Reaction persistence (Phase 7.2) ----------------------------------------
+
+test("normalizeMessage keeps a reaction of 'up' or 'down' and drops anything else", () => {
+  const s = db.createSession('reaction-user', 'reactions');
+  const updated = db.updateSession(s.id, 'reaction-user', {
+    messages: [
+      { role: 'assistant', content: 'a', reaction: 'up' },
+      { role: 'assistant', content: 'b', reaction: 'down' },
+      { role: 'assistant', content: 'c', reaction: 'sideways' },
+      { role: 'assistant', content: 'd' },
+    ],
+  });
+  const reactions = updated.messages.map((m) => m.reaction);
+  assert.deepEqual(reactions, ['up', 'down', undefined, undefined]);
+});

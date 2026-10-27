@@ -238,6 +238,49 @@ namespace LocalTheftAuto
         public const float ShaftAlphaBase = 0.055f;   // clear night
         public const float ShaftAlphaRainMax = 3.4f;  // multiplier at full rainIntensity
 
+        // ---- Turf economics (Systems.TurfStep) ----
+        // Each gang cluster SpawnWorld plants sits on a "turf" — a corner the
+        // two factions contest. Clearing it (all gangsters there dead) pays a
+        // lump and drops one crate on the corner; standing inside it with the
+        // turf held pays a drip. Both key to the sim clock (GameState.Time) so
+        // a pause freezes them, exactly like every other scoring/heat system.
+        public const int TurfClearScore = 150;    // lump for clearing a turf's whole crew
+        public const int TurfHoldScore = 20;      // drip per TurfHoldInterval while holding a cleared turf
+        public const float TurfHoldInterval = 2.0f; // sim seconds between drip ticks
+        public const float TurfHoldRadius = 130f;  // player within this of a turf counts as holding it
+        public const bool TurfDropCrate = true;    // a cleared turf drops one SMG crate on the corner
+
+        // ---- optional local AI NPC bridge (LTA.NpcBridge.cs, F19) ----
+        // The bridge POSTs to the local Ollama proxy's /api/game-npc when a
+        // bearer token is present in PlayerPrefs ("lta_npc_token"); with no
+        // token it is disabled and every request falls back to Canned().
+        // Host/port default to the proxy this project ships with (server.js,
+        // PORT 4173). Timeout is the client-side cap before a request is
+        // aborted and the fallback line used.
+        public const string NpcBridgeHost = "127.0.0.1";
+        public const int NpcBridgePort = 4173;
+        public const float NpcBridgeTimeoutSec = 8f;
+
+        // ---- stats/achievements thresholds (LTA.Stats.cs, from game.js) ----
+        // Drifter unlocks after this many px of skid laid — JS:
+        // `if (stats.drifted > 5000) unlockAch("drifter")`.
+        public const int DriftedAchievementPx = 5000;
+        // Most Wanted: seconds survived at 5★ — JS:
+        // `if (stats.fiveStarSeconds > 20) unlockAch("mostWanted")`.
+        public const int MostWantedSeconds = 20;
+        // Courier: deliveries completed — JS:
+        // `if (stats.deliveries >= 5) unlockAch("courier")`.
+        public const int CourierDeliveries = 5;
+
+        // ---- mission tuning (LTA.Missions.cs, from game.js) ----
+        // Circuit checkpoints must be at least this far apart (JS: < 400).
+        public const float CircuitMinGap = 400f;
+        // VIP follow speed (JS: vip walks toward player at 95 u/s).
+        public const float VipFollowSpeed = 95f;
+        // Pickup radius for escort pickup (JS: < 40²) and delivery (JS: < 46²).
+        public const float EscortPickupR = 40f;
+        public const float EscortDeliverR = 46f;
+
         // ---- Realism pass: per-body-type driving stats (Phase 3) ----
         // Body type is derived from CarEnt.Seed so the MESH silhouette
         // (MeshKit.BuildCar picks Sedan/Hatch/Van/Bike off the same seed) and
@@ -247,17 +290,32 @@ namespace LocalTheftAuto
         // T11: BodyBike — narrow, fast, twitchy. Its Seed branch is
         // (seed % 8) == 4 so bikes are ~12.5% of spawned traffic, and the
         // leftover sedans/hatches/vans keep their original 0/1/2 branches.
-        public const int BodySedan = 0, BodyHatch = 1, BodyVan = 2, BodyBike = 3;
-        public static readonly float[] BodyAccel = { 250f, 300f, 200f, 380f };      // units/s^2 — hatch nippy, bike launch hardest
-        public static readonly float[] BodyTopSpeed = { 280f, 250f, 305f, 340f };  // bike tops out highest
-        public static readonly float[] BodyReverse = { -95f, -90f, -80f, -40f };   // bikes barely reverse
-        public static readonly float[] BodyGrip = { 8f, 9f, 6f, 10.5f };           // cornering grip — bike leans and bites… until it doesn't
-        public static readonly float[] BodyHandbrakeGrip = { 2.2f, 2.4f, 1.8f, 1.4f }; // handbrake on a bike = slide out
-        public static readonly float[] BodyMass = { 1f, 0.8f, 1.5f, 0.45f };       // used for crash impulses — a bike LOSES head-ons
-        public static readonly float[] BodyCruiseMult = { 1f, 0.95f, 1.15f, 0.9f }; // AI traffic cruise factor
+        // Slice 3: BodyTruck/BodySports join the set. The Seed→BodyType branches
+        // below are the load-bearing invariant (mesh and physics must
+        // agree); the truck and sports car each take a NEW branch so no
+        // existing seed re-rolls — saved garage cars (gBody 0..3) keep
+        // their class on load.
+        public const int BodySedan = 0, BodyHatch = 1, BodyVan = 2, BodyBike = 3, BodyTruck = 4, BodySports = 5;
+        public static readonly float[] BodyAccel = { 250f, 300f, 200f, 380f, 180f, 330f };      // units/s^2 — truck barely moves, bike launch hardest
+        public static readonly float[] BodyTopSpeed = { 280f, 250f, 305f, 340f, 235f, 420f };  // truck bottom-of-pile; sports tops the chart
+        public static readonly float[] BodyReverse = { -95f, -90f, -80f, -40f, -55f, -120f };   // trucks reverse painfully slow
+        public static readonly float[] BodyGrip = { 8f, 9f, 6f, 10.5f, 5.5f, 6.5f };           // truck slides wide, sports is twitchy
+        public static readonly float[] BodyHandbrakeGrip = { 2.2f, 2.4f, 1.8f, 1.4f, 1.2f, 1.9f }; // handbrake on a bike = slide out
+        public static readonly float[] BodyMass = { 1f, 0.8f, 1.5f, 0.45f, 2.2f, 0.7f };       // used for crash impulses — a truck EATS head-ons
+        public static readonly float[] BodyCruiseMult = { 1f, 0.95f, 1.15f, 0.9f, 0.72f, 1.25f }; // AI traffic cruise factor
         // T11: half-width for car-car push / probe tests. Cars share the
         // historical 30f flat circle; the bike is genuinely narrower.
-        public static readonly float[] BodyRadius = { 30f, 30f, 30f, 16f };
+        // Slice 3: the truck is a genuinely WIDE machine.
+        public static readonly float[] BodyRadius = { 30f, 30f, 30f, 16f, 34f, 28f };
+
+        // ---- Slice 3 (H): wreckage lifecycle ----
+        // A wrecked traffic car lingers as a smoking obstacle for this long,
+        // then leaves the world; while within WreckSmokeRadius of the player
+        // it emits smoke at WreckSmokeRate per second (probabilistic).
+        // Traffic already brakes for wrecks via ProbeAhead.
+        public const float WreckLinger = 45f;
+        public const float WreckSmokeRadius = 1200f;
+        public const float WreckSmokeRate = 1.2f;
 
         // ---- Realism pass: braking and power band (Phase 14) ----
         // Brakes are a separate, much stronger deceleration than the engine's
@@ -266,7 +324,11 @@ namespace LocalTheftAuto
         // its own (weak) accel since it has the most mass to shed. The bike
         // brakes hard per-kilo (two wheels, no engine block to carry) but its
         // short wheelbase means the rear is always threatening to pass the front.
-        public static readonly float[] BodyBrake = { 480f, 520f, 420f, 620f };
+        // Slice 3: extended with the truck (2) and sports (5) bodies — the truck
+        // brakes like nothing else in the city: the force is only ~1.9x its
+        // anemic 180 accel, so it takes real road to stop, exactly like a
+        // real heavy vehicle; the sports car stops hard, per-kilo.
+        public static readonly float[] BodyBrake = { 480f, 520f, 420f, 620f, 340f, 580f };
         // PowerBandFloor: fraction of full accel left once a car is right at
         // its top speed — engines lose pull near the limiter instead of
         // shoving flat-out acceleration all the way to the cap.
@@ -561,14 +623,25 @@ namespace LocalTheftAuto
         // silhouette (BuildCar) and the per-body-type physics lookup so a
         // car that looks like a van handles like one. Branch on Seed:
         // %8==4 → bike, else %3 picks car (0/1/2) so 3/4 of seeds keep
-        // the original car mix and bikes land at ~12.5% of traffic.
+        // the original car mix; Slice 3 adds %8==5 sports and %8==6 truck.
         public int Seed;
+        // Slice 3 (H): sim-time the car was wrecked; -1 until then. WreckStep
+        // ages wrecks off this and drops them at Cfg.WreckLinger.
+        public double WreckedAt = -1e9;
 
+        // Slice 3: two NEW seed branches — %8==5 → sports, %8==6 → truck —
+        // added beside the bike branch; %8==7 stays sedan so every
+        // pre-existing seed keeps its class (garage saves round-trip).
+        // Shares: sedan .25, hatch .25, van .125, bike .125, sports .125,
+        // truck .125 — the new classes each land at 12.5% of traffic.
         public int BodyType
         {
             get
             {
-                if ((Seed & 7) == 4) return Cfg.BodyBike;
+                int m = Seed & 7;
+                if (m == 4) return Cfg.BodyBike;
+                if (m == 5) return Cfg.BodySports;
+                if (m == 6) return Cfg.BodyTruck;
                 return Seed % 3;   // follows MeshKit.BuildCar's car pick
             }
         }
@@ -678,6 +751,22 @@ namespace LocalTheftAuto
         public GameObject Go;
     }
 
+    // A contested corner: the turf a SpawnWorld gang cluster is planted on.
+    // Gangsters are indexed into GameData.Peds (they keep that list's
+    // identity for the visual/death/respawn pipeline); this entry just
+    // records WHO belongs to this turf and the turf's own state. Dead
+    // gangsters are still counted here (dead = cleared) — RespawnDeadPeds
+    // revives them later, at which point the turf re-arms itself.
+    public class TurfEnt
+    {
+        public float X, Y;                    // corner center (JS pixel space)
+        public int Bx, By;                    // block coords — the turf's identity (deterministic per corner)
+        public int[] GangsterIdx;             // indices into GameData.Peds of this turf's crew
+        public bool Cleared;                  // lump paid; re-arms on respawn
+        public bool CrateDropped;             // the cleared-turf crate was already spawned
+        public double LastDrip;               // sim-clock time of the last hold drip
+    }
+
     public class ParticleEnt
     {
         // Realism pass (Phase 8): Splash reuses this same entity/pool
@@ -740,7 +829,7 @@ namespace LocalTheftAuto
         public float SpikePenalty;
     }
 
-    public enum MissionKind { Delivery, Rampage, Steal, GangWar }
+    public enum MissionKind { Delivery, Rampage, Steal, GangWar, Circuit, Ram, Escort }
 
     public enum Weather { Clear, Rain, Fog }   // T10: Fog is the third state
 
@@ -792,6 +881,18 @@ namespace LocalTheftAuto
         public CarEnt StealTarget;                // the specific car to steal + deliver
         public int GangWarGoal, GangWarCount;     // gangsters to drop / dropped so far
         public int GangWarGang;                   // the faction this contract is on
+        // Circuit: ordered checkpoint list + how many have been hit.
+        // MissionX/MissionY hold the CURRENT checkpoint (for marker/HUD).
+        public System.Collections.Generic.List<Vector2> CircuitCps;
+        public int CircuitIndex;
+        // Ram: the specific moving car to wreck. Reuses StealTarget's
+        // CarEnt reference pattern (StealTarget stays null during a Ram).
+        public CarEnt RamTarget;
+        // Escort: the VIP ped (reuses PedEnt so it inherits the whole
+        // visual/death/respawn pipeline, same design decision as gangsters).
+        // null when no escort is live.
+        public PedEnt Vip;
+        public bool VipFollowing;
 
         public int HighScore;           // persisted via PlayerPrefs
 
@@ -837,6 +938,7 @@ namespace LocalTheftAuto
         public readonly List<ParticleEnt> Particles = new List<ParticleEnt>();
         public readonly List<SkidEnt> Skids = new List<SkidEnt>();
         public readonly List<SpikeStripEnt> SpikeStrips = new List<SpikeStripEnt>();
+        public readonly List<TurfEnt> Turfs = new List<TurfEnt>();
         public readonly PlayerState Player = new PlayerState();
         public readonly GameState State = new GameState();
     }

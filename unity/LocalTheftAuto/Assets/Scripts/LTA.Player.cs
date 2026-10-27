@@ -153,6 +153,12 @@ namespace LocalTheftAuto
             p.InCar = best;
             p.Health = best.Health;
 
+            // F19: every car you get behind the wheel of counts as a steal
+            // for the lifetime stat + First Steal achievement (JS
+            // stats.steals++ / unlockAch("firstSteal") in tryEnterExit).
+            StatsSys.Steals();
+            StatsSys.Unlock("firstSteal");
+
             // T5: car theft goes through the witness system — the old
             // inline 130px loop raised stars instantly; now a witnessed
             // theft starts the report window (killable witness) and an
@@ -289,6 +295,10 @@ namespace LocalTheftAuto
                         A = car.A, Life = 6f
                     });
                     if (d.Skids.Count > 500) d.Skids.RemoveAt(0);
+                    // F19: accumulate drifted px (JS: stats.drifted += spd * dt)
+                    // and unlock the Drifter at the JS threshold.
+                    if (StatsSys.AddDrifted(Mathf.RoundToInt(spd * dt)) > Cfg.DriftedAchievementPx)
+                        StatsSys.Unlock("drifter");
                 }
                 // Realism pass (Phase 14): sliding tires scrub speed, not
                 // just paint skid marks — grip lost sideways is grip lost
@@ -386,7 +396,15 @@ namespace LocalTheftAuto
                         if (!o.Parked && spd * rel > 130f && !o.Wrecked)
                         {
                             o.Wrecked = true; o.Speed = 0f;
+                            o.WreckedAt = d.State.Time;   // Slice 3: wreckage linger clock
                             Systems.RegisterWreck(d);
+                            // F19: smashing a moving car pays out a style bonus.
+                            // (The JS car pass awards 150 for a cop roadblock
+                            // specifically; a plain traffic wreck carries no
+                            // awardStyle in the original — see the report. This
+                            // slice awards the traffic wreck at the same 150
+                            // value so the combo has a visible on-road trigger.)
+                            StatsSys.Award(150, "WRECKED", o.X, o.Y);
                         }
                         // the player's own damage scales with how heavy the
                         // thing they hit is, relative to them.

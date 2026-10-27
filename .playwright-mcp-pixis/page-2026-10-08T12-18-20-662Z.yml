@@ -1,0 +1,111 @@
+- generic [active] [ref=f27e1]:
+  - banner [ref=f27e2]:
+    - generic [ref=f27e3]:
+      - link "Local Theft Auto — home" [ref=f27e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f27e6]: Local Theft Auto
+      - navigation "Primary" [ref=f27e7]:
+        - link "World" [ref=f27e8] [cursor=pointer]:
+          - /url: /world
+        - link "Vehicles" [ref=f27e9] [cursor=pointer]:
+          - /url: /driving
+        - link "Missions" [ref=f27e10] [cursor=pointer]:
+          - /url: /missions
+        - link "Wanted" [ref=f27e11] [cursor=pointer]:
+          - /url: /wanted
+        - link "Progression" [ref=f27e12] [cursor=pointer]:
+          - /url: /progression
+        - link "FAQ" [ref=f27e13] [cursor=pointer]:
+          - /url: /faq
+      - link "▶ Play now" [ref=f27e14] [cursor=pointer]:
+        - /url: /game
+  - main [ref=f27e15]:
+    - region [ref=f27e16]:
+      - generic [ref=f27e17]:
+        - generic [ref=f27e18]:
+          - paragraph [ref=f27e19]: combat
+          - heading "One punch. Maybe a bat. Never a gun." [level=1] [ref=f27e21]
+          - paragraph [ref=f27e22]: "Combat in Local Theft Auto is shove-and-stun comedy, not a shooter: pedestrians panic and stagger back, police get briefly stunned rather than hurt, and the only upgrade you'll ever find lying in the street is a baseball bat."
+        - generic [ref=f27e24]:
+          - generic [ref=f27e25]: F
+          - generic [ref=f27e26]: SPACE
+    - region "Combat systems" [ref=f27e27]:
+      - generic [ref=f27e28]:
+        - generic [ref=f27e29]:
+          - article [ref=f27e30]:
+            - heading "The punch" [level=3] [ref=f27e31]
+            - paragraph [ref=f27e32]: On foot, press F to swing in front of you. Anyone standing inside the reach and arc gets knocked back and startled — a short cooldown keeps it from becoming a machine gun.
+          - article [ref=f27e33]:
+            - heading "The bat" [level=3] [ref=f27e34]
+            - paragraph [ref=f27e35]: Pick one up from a weapon drop and every future swing reaches further and stuns a police officer more than twice as long — 2.5 seconds instead of 1.2.
+        - generic [ref=f27e36]:
+          - generic [ref=f27e39]:
+            - heading "Pedestrians who panic" [level=3] [ref=f27e40]
+            - paragraph [ref=f27e41]: A hit ped doesn't just flinch — it flees for a few seconds at a raised panic speed, the same fear response a near-miss from a fast car or a nearby siren triggers.
+          - generic [ref=f27e44]:
+            - heading "Cops that stun, not fall" [level=3] [ref=f27e45]
+            - paragraph [ref=f27e46]: Landing a hit on an officer freezes their pursuit briefly (their siren keeps flashing) — but it also adds a full star of wanted level, because assaulting an officer is exactly as serious as it sounds, locally.
+          - generic [ref=f27e49]:
+            - heading "Rubbernecking" [level=3] [ref=f27e50]
+            - paragraph [ref=f27e51]: Nearby pedestrians who aren't already panicking will stop and stare at a recent crash or wreck instead of walking on — a small touch that makes the city feel like it's actually watching.
+          - generic [ref=f27e54]:
+            - heading "Comedy, not gore" [level=3] [ref=f27e55]
+            - paragraph [ref=f27e56]: Nobody dies on screen. Peds "go down" and respawn elsewhere shortly after; the aesthetic stays a toy city the whole way through — deliberately, not as a technical limitation.
+    - region [ref=f27e57]:
+      - generic [ref=f27e58]:
+        - generic [ref=f27e59]:
+          - heading "Land enough hits, earn the achievement." [level=2] [ref=f27e60]
+          - paragraph [ref=f27e61]: Every connecting punch or swing counts toward your lifetime stats, tracked right alongside steals and deliveries — throw enough of them and Brawler unlocks for good.
+        - link "See every achievement" [ref=f27e62] [cursor=pointer]:
+          - /url: progression.html
+          - text: See every achievement →
+    - region [ref=f27e63]:
+      - generic [ref=f27e64]:
+        - paragraph [ref=f27e65]: fists up
+        - heading "Find the bat. Swing first." [level=2] [ref=f27e67]: Find the bat.Swing first.
+        - link "▶ Play Local Theft Auto" [ref=f27e68] [cursor=pointer]:
+          - /url: game.html
+        - paragraph [ref=f27e69]: F to punch or swing · weapon drops respawn elsewhere
+  - contentinfo [ref=f27e70]:
+    - generic [ref=f27e71]:
+      - generic [ref=f27e72]:
+        - paragraph [ref=f27e73]:
+          - generic [ref=f27e75]: Local Theft Auto
+        - paragraph [ref=f27e76]: A top-down city that runs entirely in your browser tab. One canvas, one script, zero network calls — the only thing you can steal is the high score.
+      - navigation "The game" [ref=f27e77]:
+        - paragraph [ref=f27e78]: The game
+        - link "World" [ref=f27e79] [cursor=pointer]:
+          - /url: /world
+        - link "Vehicles" [ref=f27e80] [cursor=pointer]:
+          - /url: /driving
+        - link "Missions" [ref=f27e81] [cursor=pointer]:
+          - /url: /missions
+        - link "Wanted" [ref=f27e82] [cursor=pointer]:
+          - /url: /wanted
+      - navigation "Playing" [ref=f27e83]:
+        - paragraph [ref=f27e84]: Playing
+        - link "Combat" [ref=f27e85] [cursor=pointer]:
+          - /url: /combat
+        - link "Progression" [ref=f27e86] [cursor=pointer]:
+          - /url: /progression
+        - link "Controls" [ref=f27e87] [cursor=pointer]:
+          - /url: /controls
+        - link "FAQ" [ref=f27e88] [cursor=pointer]:
+          - /url: /faq
+      - generic [ref=f27e89]:
+        - paragraph [ref=f27e90]: Quick start
+        - paragraph [ref=f27e91]: WASD — walk / drive
+        - paragraph [ref=f27e92]: E — enter or exit a car
+        - paragraph [ref=f27e93]: F — punch or swing
+        - link "Open game →" [ref=f27e94] [cursor=pointer]:
+          - /url: /game
+    - generic [ref=f27e95]:
+      - paragraph [ref=f27e96]:
+        - text: © 2026 Local Theft Auto — local by design. Built inside the
+        - link "Ollama Chat" [ref=f27e97] [cursor=pointer]:
+          - /url: /about
+        - text: project.
+      - link "Back to top ↑" [ref=f27e98] [cursor=pointer]:
+        - /url: "#top"
+  - button "Open chat with your local Ollama" [ref=f27e100] [cursor=pointer]
+  - alert [ref=f27e105]

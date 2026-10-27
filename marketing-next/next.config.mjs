@@ -5,6 +5,10 @@ const nextConfig = {
   output: "export",
   trailingSlash: true,
   devIndicators: false,
+  // Two lockfiles exist (root project + this app); Turbopack was inferring the
+  // parent dir as workspace root, which mis-resolves React in build workers
+  // ("useContext of null" while prerendering /_global-error and /_not-found).
+  turbopack: { root: import.meta.dirname },
 };
 
 export default nextConfig;

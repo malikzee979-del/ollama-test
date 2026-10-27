@@ -40,6 +40,15 @@ db.exec(`
     expires_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
+  CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
 `);
 
 // --- password hashing (scrypt, built into Node's crypto module) --------
@@ -242,6 +251,70 @@ function clearLoginFailures(username, ip) {
   failedLoginAttempts.delete(lockoutKey(username, ip));
 }
 
+// --- API tokens (TODO 7.14) ------------------------------------------------
+// Personal API keys so scripts can call /api/* without a browser cookie.
+// Unlike sessions they never expire on their own, are listed without their
+// secret (only a prefix is kept for display), and are revoked explicitly.
+// The full token is returned exactly once, at creation.
+
+const API_TOKEN_PREFIX = 'oc_';
+const MAX_API_TOKENS = 50;
+const MAX_API_TOKEN_NAME_CHARS = 60;
+
+function createApiToken(userId, name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) throw new Error('Token name must be a non-empty string.');
+  if (trimmed.length > MAX_API_TOKEN_NAME_CHARS) {
+    throw new Error(`Token name must not exceed ${MAX_API_TOKEN_NAME_CHARS} characters.`);
+  }
+  const count = db.prepare('SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?').get(userId).n;
+  if (count >= MAX_API_TOKENS) {
+    throw new Error(`At most ${MAX_API_TOKENS} API tokens are kept; delete one first.`);
+  }
+  const id = crypto.randomUUID();
+  const token = API_TOKEN_PREFIX + crypto.randomBytes(24).toString('base64url');
+  const createdAt = new Date().toISOString();
+  db.prepare('INSERT INTO api_tokens (id, user_id, name, token, created_at) VALUES (?, ?, ?, ?, ?)').run(
+    id, userId, trimmed, token, createdAt
+  );
+  return { id, name: trimmed, token, createdAt, prefix: token.slice(0, 8) };
+}
+
+// Public listing shape: never includes the secret itself.
+function listApiTokens(userId) {
+  return db
+    .prepare('SELECT id, name, token, created_at, last_used_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      prefix: `${API_TOKEN_PREFIX}${row.token.slice(API_TOKEN_PREFIX.length, API_TOKEN_PREFIX.length + 6)}`,
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at || null,
+    }));
+}
+
+function deleteApiToken(userId, id) {
+  const result = db.prepare('DELETE FROM api_tokens WHERE id = ? AND user_id = ?').run(id, userId);
+  return result.changes > 0;
+}
+
+// Bearer-token lookup. Touches last_used_at (best-effort) so the UI can
+// show which keys scripts are actually using.
+function getUserByApiToken(token) {
+  if (typeof token !== 'string' || !token.startsWith(API_TOKEN_PREFIX)) return null;
+  const row = db.prepare('SELECT t.user_id, t.id AS token_id, t.last_used_at FROM api_tokens t WHERE t.token = ?').get(token);
+  if (!row) return null;
+  const user = getUserById(row.user_id);
+  if (!user) return null;
+  try {
+    db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(new Date().toISOString(), row.token_id);
+  } catch {
+    // last_used_at is display metadata; a failure here must not fail auth.
+  }
+  return toPublicUser(user);
+}
+
 module.exports = {
   DB_FILE,
   SESSION_COOKIE,
@@ -253,6 +326,12 @@ module.exports = {
   getUserBySessionToken,
   deleteSession,
   pruneExpiredSessions,
+  // API tokens (7.14)
+  API_TOKEN_PREFIX,
+  createApiToken,
+  listApiTokens,
+  deleteApiToken,
+  getUserByApiToken,
   // login lockout (see the section comment above)
   LOCKOUT_WINDOW_MS,
   LOCKOUT_MAX_FAILURES,

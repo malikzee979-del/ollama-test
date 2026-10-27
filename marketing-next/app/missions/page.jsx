@@ -95,7 +95,7 @@ const HTML = `
     <div class="wrap closing-wrap">
       <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>the board is posting</p>
       <h2 id="close-h" class="display closing-h reveal">Take the job.<br><span class="grad">Beat the clock.</span></h2>
-      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <a class="nav-cta cta-big reveal" href="/game">▶ Play Local Theft Auto</a>
       <p class="closing-note mono reveal">One active mission · a fresh one posts automatically</p>
     </div>
   </section>

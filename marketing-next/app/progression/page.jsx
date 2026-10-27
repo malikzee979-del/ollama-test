@@ -86,7 +86,7 @@ const HTML = `
     <div class="wrap closing-wrap">
       <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>your best run is waiting</p>
       <h2 id="close-h" class="display closing-h reveal">Beat your best.<br><span class="grad">It remembers.</span></h2>
-      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <a class="nav-cta cta-big reveal" href="/game">▶ Play Local Theft Auto</a>
       <p class="closing-note mono reveal">R for a fresh city · your save always comes along</p>
     </div>
   </section>

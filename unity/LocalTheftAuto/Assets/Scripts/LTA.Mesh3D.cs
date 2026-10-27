@@ -560,6 +560,29 @@ namespace LocalTheftAuto
             {-15f, 14.4f, -17f,  9.6f },
             {-17f,  9.6f, -19f,  9.6f },
         };
+        // Slice 3: sports — low, short, tapers into a fastback. Shares the
+        // BuildCar assembly (wheels/bumpers/lights), so only the silhouette
+        // profile is new.
+        static readonly float[,] SportsProf =
+        {
+            { 18f,  5.4f,  14f,  7.2f },
+            { 14f,  7.2f,   4f,  7.6f },
+            {  4f,  7.6f,  -4f, 10.6f },
+            { -4f, 10.6f, -14f,  7.0f },
+            {-14f,  7.0f, -18f,  5.6f },
+        };
+        // Slice 3: truck — long; low high cab up front, flat low bed behind
+        // (two distinct deck heights read as "box truck" from the side).
+        static readonly float[,] TruckProf =
+        {
+            { 24f,  7.5f,  20f,  9.8f },
+            { 20f,  9.8f,  16f,  9.8f },
+            { 16f,  9.8f,  11f, 16.5f },
+            { 11f, 16.5f,   4f, 16.5f },
+            {  4f, 16.5f,   1f,  8.2f },
+            {  1f,  8.2f, -24f,  8.2f },
+            {-24f,  8.2f, -26f,  6.8f },
+        };
 
         // FloorY leaves an underbody gap so the wheels show beneath the car;
         // wheels must stay INSIDE SideHx and below the chamfer or they bulge
@@ -694,9 +717,14 @@ namespace LocalTheftAuto
             var t = v.Root.transform;
             v.BaseColor = tint;
 
+            // Slice 3: sports/truck take the same NEW seed branches as CarEnt.BodyType
+            // (%8==5, %8==6) so mesh and physics keep agreeing for every seed.
+            int seedBr = cop ? 0 : (seed & 7);
             float[,] prof = cop ? SedanProf
-                : ((seed & 7) == 4 ? null   // T11: bike — built by BuildBike below, no car profile
-                : (seed % 3 == 0 ? SedanProf : (seed % 3 == 1 ? HatchProf : VanProf)));
+                : seedBr == 4 ? null   // T11: bike — built by BuildBike below, no car profile
+                : seedBr == 5 ? SportsProf
+                : seedBr == 6 ? TruckProf
+                : (seed % 3 == 0 ? SedanProf : (seed % 3 == 1 ? HatchProf : VanProf));
 
             if (prof == null)
             {

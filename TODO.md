@@ -388,6 +388,162 @@ source behind a confirm banner.
       result), update the Health table in the same commit — stale health claims
       are how the previous three docs drifted apart.
 
+## Phase 7 — Feature backlog (2026-10-14 round 2)
+
+Fresh 20-feature wishlist, recorded here per 6.1 ("if you add work, add it
+here"). None of these duplicate the shipped round 1 list in `FEATURES.md`.
+Unchecked = not started. Priorities are suggestions; owner input welcome.
+
+### Chat & UX
+- [ ] **7.1 Branching conversations.** Fork from any message into a tree of
+      branches. Note: `db.js` schema change — 4.2 explicitly declared linear
+      history in scope-avoidance; this lifts that.
+- [x] **7.2 Message reactions & tags.** Reaction half landed 2026-10-14:
+      👍/👎 on any completed assistant reply (second click on the active one
+      clears it), persisted as a coerced `reaction` field via db.js
+      normalizeMessage (only 'up'/'down' survive a write), so the choice
+      survives a reload. Tags not built — the same field shape would carry
+      them, but the UI is undecided.
+- [x] **7.3 Prompt shortcuts toolbar.** Clickable chips (Summarize,
+      Translate, Explain code, Brainstorm, Proofread) above the composer;
+      fills the composer, never auto-sends; `{{variables}}` prompted for
+      first (extraction via `templateVariables` in chat-helpers.js). Landed
+      2026-10-14: `renderShortcutBar`/`applyShortcut` in app.js,
+      `.shortcut-chip` in style.css.
+- [x] **7.4 Inline code-diff view.** Landed 2026-10-14 (simplified shape):
+      `renderMarkdown` gives ` ```diff ` fenced blocks per-line coloring —
+      `+` additions, `-` removals, `@@` hunk headers, `--- /+++` file
+      headers as context — via `renderDiffCode` in chat-helpers.js. Content
+      is escaped before class spans wrap it, so diff text can't inject
+      markup; non-diff blocks are untouched. Not an interactive
+      apply/copy-diff editor — that larger shape stays open.
+- [ ] **7.5 Multi-model "council" mode.** One prompt → several models, answers
+      merged into a combined reply; extends `POST /api/compare`.
+
+### Knowledge & memory
+- [ ] **7.6 PDF/OCR ingestion for RAG.** Scanned PDFs and screenshots into the
+      document library. Absorbs **4.8** (pdf.js is already a dev dep); OCR
+      needs a pick (tesseract.js?) — owner decision.
+- [x] **7.7 RAG citations.** Landed 2026-10-14: server.js collects the
+      document retrieval hits and returns them base64-encoded in an
+      `X-Citations` response header (only when `useDocuments` is on; pure
+      mapping in `citations.js`, `MAX_CITATIONS` 12, snippet cap 200 chars);
+      app.js attaches them to the assistant message, db.js persists a
+      well-formed `citations` array, and the UI renders a collapsed
+      "Sources (n)" block. Malformed header fails open (no citations).
+- [x] **7.8 Memory editing UI.** Landed 2026-10-15: qdrant.js gains
+      `listPoints` (scroll by userId filter, paginated), `deletePoint`
+      (id + userId filter), and `updatePointText` (retrieve scoped by
+      owner, re-embed, upsert preserving metadata); routes
+      `GET/DELETE/PATCH /api/memory/points[/:id]` (rate-limited, per-user
+      scoped); Settings → "Stored memory" viewer with inline edit (Save
+      re-embeds) and confirm-guarded delete, paginated via next page.
+      A guessed id can never touch another account's point.
+- [x] **7.9 URL summarizer.** Landed 2026-10-15: POST `/api/summarize-url`
+      fetches a client-supplied page server-side with a deliberate SSRF
+      posture — http(s) only, no embedded credentials, all resolved
+      addresses must be public (private/loopback/link-local refused),
+      redirects not followed, 2MB body cap, HTML/plain-text only — then
+      strips to text and summarizes via Ollama with the chosen model.
+      Audited as `url.summarize`. Settings → "Summarize a web page" puts
+      the result in the composer via "Use as prompt" (never auto-sent).
+
+### Models & performance
+- [ ] **7.10 Model health dashboard.** Ollama status, loaded models,
+      VRAM/RAM, pull history.
+- [x] **7.11 Auto model routing.** Landed (client-side; verified 2026-10-21):
+      pure `suggestModel({models, text, currentModel})` in `chat-helpers.js`
+      (code-detected prompts route to the largest `coder`-family model,
+      short prompts to the smallest installed, long ones to the largest —
+      keeping the current model when it already fits), covered by
+      `test/chat-helpers.test.js`. Settings → "Auto model routing" checkbox
+      (`#autoRoute`); when on, the send path re-picks the model per prompt
+      (`app.js` ~1318). No server route needed — the installed-model list is
+      already client-visible.
+- [x] **7.12 Quantization advisor.** Landed (verified 2026-10-21): pure
+      `quantizationSuggestions(installed)` in `chat-helpers.js` — groups
+      installed models by shared base name and suggests a same-family
+      variant that is ≥30% smaller on disk, returning saved bytes/percent;
+      rendered in the model-health modal (`app.js` ~2903).
+- [x] **7.13 Response caching.** Landed 2026-10-14: in-browser LRU (50
+      entries, tab-lifetime) keyed by `cacheKeyFor` — model + full
+      Ollama-shaped conversation prefix + sampling options + serverId, with
+      key-order-insensitive option objects. Hits replay the reply instantly
+      with a "· cached" role badge and short-circuit to persistence;
+      regenerate and edit bypass the cache (a cached regenerate would be a
+      no-op). Opt-out checkbox in Settings ("Cache identical responses");
+      hit/miss/stored counts in the stats modal.
+
+### Platform & integrations
+- [ ] **7.14 API tokens.** Personal API keys so scripts can call `/api/chat`
+      without browser-cookie auth. Security review needed (2.x discipline).
+- [ ] **7.15 Webhook triggers.** Fire configurable HTTP hooks on events (pull
+      finished, new session). SSRF guard required — see the multi-server
+      fallback note in FEATURES.md.
+- [x] **7.16 PWA support.** Landed 2026-10-21 (offline shell + installability;
+      queued messages deliberately out — see below): `public/manifest.webmanifest`
+      (standalone display, SVG icons) + `public/icon.svg` / `icon-maskable.svg`;
+      `public/sw.js` precaches the app shell cache-first with background
+      refresh, serves navigations network-first with the cached shell as the
+      offline fallback, and **never caches `/api/*` or non-GETs** — offline chat
+      shows the app's existing error banner rather than a stale replay.
+      Registration in app.js is fail-open and secure-context-only.
+      Pinned by `test/pwa.test.js` (manifest shape, index.html link,
+      sw.js cache rules, fail-open registration).
+      **Offline send queue (the "queued messages" half) landed 2026-10-21:**
+      a send that fails at the network level (`TypeError`, no response) is
+      parked in localStorage via pure helpers in chat-helpers.js
+      (`enqueueOfflineSend`/`shiftOfflineSend`/`offlineQueueCount`, storage
+      injected — 20-entry FIFO, text-only, attachments/images excluded) and
+      the UI says the message is queued. Flush triggers: the browser
+      `online` event and a successful `/api/health` poll — deliberately not
+      every send completion, which against a still-down server would be a
+      hot retry loop. Regenerate/edit is never queued (bypassCache).
+      Covered by four tests in `test/chat-helpers.test.js` (roundtrip,
+      validation, cap — the cap drops the OLDEST overflow, keeping the
+      newest — and corrupt-storage recovery).
+- [x] **7.17 Keyboard-only navigation + ARIA audit.** Partial pass landed
+      2026-10-21. Already in place before this pass (verified, not assumed):
+      modals carry `role="dialog"`/`aria-modal`, settings + command palette
+      handle Escape and manage focus, every icon-only composer/top-bar button
+      has `title` + `aria-label`, the export menu is a real `role="menu"`,
+      visually-hidden labels back the model select and composer. This pass
+      added: a shared Escape handler for the stats / metrics / model-health /
+      compare overlays (the only dialogs without one), and keyboard
+      reachability for sidebar chat items — they were `div onclick`, i.e.
+      invisible to keyboard users; now `role="button"` + `tabindex` +
+      Enter/Space activation + `aria-current` on the open chat +
+      `:focus-visible` outline. **Completion landed 2026-10-21:** a shared
+      focus trap (one Tab handler — while exactly one overlay is open, Tab
+      cycles inside it and focus that escaped the dialog is pulled back to
+      its first focusable), and Arrow-key roving in the chat list
+      (Up/Down moves focus between chat items). Focus restoration on close
+      (hideModal → opener) was also added for the four simple overlays in
+      the same pass. Still open if a deeper pass is wanted: Arrow-key
+      roving does not wrap at the list ends, and the palette's own list
+      navigates separately.
+
+### Data & safety
+- [x] **7.18 Scheduled session cleanup.** Landed 2026-10-14: db.js
+      `cleanupPreview`/`deleteSessionsOlderThan` (stale = updatedAt before
+      an ISO cutoff the caller computes; per-user scoped); GET
+      `/api/cleanup/preview?days=N` and POST `/api/cleanup` (days 1–3650,
+      refuses without `{ confirm: true }`, audited as `session.cleanup`);
+      Settings → Data gets preview list + delete UI with a confirm.
+- [ ] **7.19 Encrypted-at-rest chat store.** Optional passphrase-based
+      encryption of session data in `data/`. Migration path needed.
+- [x] **7.20 Usage reports.** Landed 2026-10-14: on-demand GET
+      `/api/usage-report` computed from the user's own session store
+      (sessions/messages, user vs assistant counts, estimated tokens via
+      the chars/4 heuristic, last-7-days slice, per-model breakdown, top 5
+      largest chats); Settings → Data renders it ("Generate usage report").
+      No email — the report is in-app only, so nothing ever leaves the
+      machine.
+
+### Still-open round-1 halves (from FEATURES.md "out of scope" table)
+- [ ] **7.21 Wire `marketing/game.js` and the Unity port to `/api/game-npc`.**
+- [ ] **7.22 Offline-first sync for the mobile clients** (Flutter/RN).
+
 ---
 
 ## Execution order
@@ -474,3 +630,11 @@ are gated on Decisions A and B.
 - [x] README documents every satellite project (mobile, mobile-rn, python_app,
       marketing, unity) with a repository-layout table — the old "not mentioned
       in README" item is obsolete.
+- [x] **Unity: turf economics** (landed 2026-10-20). Each gang cluster's corner
+      is now a `TurfEnt` (`LTA.Core.cs`); `Systems.TurfStep` pays a lump for
+      clearing a turf's whole crew (drops one SMG crate on the corner) and a
+      recurring drip for standing inside a cleared turf, both on the sim clock.
+      `SpawnWorld` tracks each turf's crew; the dropped crate reuses the
+      existing `SyncWeapons` visual pool. Verified headless in
+      `Assets/Editor/TurfSimTest.cs` (27 checks; caught and fixed a `LastDrip`
+      sentinel that made a fresh clear fire an immediate drip).

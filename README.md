@@ -562,5 +562,49 @@ winston/pino/morgan.
 - `GET /api/metrics` returns an in-memory JSON snapshot: total request count,
   total upstream Ollama error count (503s), per-route request counts broken
   down by status code, average/min/max latency per route, process uptime,
-  and `process.memoryUsage()`. Metrics live only in memory and reset on
-  restart.
+and `process.memoryUsage()`. Metrics live only in memory and reset on
+restart.
+
+## Troubleshooting
+
+**Ollama isn't running.** The server proxies to Ollama at
+`http://127.0.0.1:11434` — if it's down, chat requests fail with a 503 and
+`/api/health` reports the upstream as unreachable. Start Ollama first
+(`ollama serve`, or launch the desktop app), then verify it's responding:
+
+```bash
+curl http://127.0.0.1:11434/api/tags
+```
+
+If Ollama runs on another host or port, point the app at it:
+
+```bash
+OLLAMA_HOST=http://127.0.0.1:11434 npm start
+```
+
+**A model isn't installed.** The model dropdown only lists what `ollama
+list` shows; sending to a missing model returns an error from the upstream.
+Pull the model (name it exactly as Ollama expects, e.g. `llama3.1:8b`):
+
+```bash
+ollama pull llama3.1:8b
+```
+
+Then click the refresh button in the app (or restart it) so the dropdown
+re-reads the installed list. You can also pull from inside the app's
+Settings modal under "Model management".
+
+**Port 3000 (or your configured `PORT`) is already in use.** Another
+process is bound to it — either stop that process or run the app on a
+different port:
+
+```bash
+PORT=8080 npm start
+```
+
+The default port is **4173** (see Setup above); whatever you set as `PORT`
+is the port you open in the browser. To find what's holding a port:
+
+```bash
+lsof -i :3000
+```

@@ -234,3 +234,117 @@ test('a Qdrant outage surfaces an error, and the next request recovers once it i
   assert.equal(searchCalls, 1, 'the recovery request must succeed on its first search');
   assert.deepEqual(results, [{ id: 'p1', score: 0.9, payload: { text: 'back online' } }]);
 });
+
+// --- Memory editing (Phase 7.8): listPoints / deletePoint / updatePointText --
+
+test('listPoints scrolls by the userId filter and returns id+payload with nextOffset', async () => {
+  const qdrant = freshQdrant();
+  let scrollArgs = null;
+  const fake = {
+    async collectionExists() { return { exists: true }; },
+    async getCollection() { return { config: { params: { vectors: { size: qdrant.EMBEDDING_DIM } } } }; },
+    async scroll(collection, args) {
+      scrollArgs = { collection, args };
+      return {
+        points: [
+          { id: 'p1', payload: { userId: 42, text: 'hello' } },
+          { id: 'p2', payload: { userId: 42, text: 'world' } },
+        ],
+        next_page_offset: 'p3',
+      };
+    },
+  };
+  qdrant._setClientForTests(fake);
+
+  const page = await qdrant.listPoints({ userId: 42, limit: 2, offset: 'p0' });
+
+  assert.equal(scrollArgs.collection, qdrant.QDRANT_COLLECTION);
+  assert.deepEqual(scrollArgs.args.filter, { must: [{ key: 'userId', match: { value: 42 } }] });
+  assert.equal(scrollArgs.args.offset, 'p0');
+  assert.deepEqual(page.points.map((p) => p.id), ['p1', 'p2']);
+  assert.equal(page.points[0].payload.text, 'hello');
+  assert.equal(page.nextOffset, 'p3');
+});
+
+test('listPoints maps a null next_page_offset to null nextOffset', async () => {
+  const qdrant = freshQdrant();
+  qdrant._setClientForTests({
+    async collectionExists() { return { exists: true }; },
+    async getCollection() { return { config: { params: { vectors: { size: qdrant.EMBEDDING_DIM } } } }; },
+    async scroll() { return { points: [], next_page_offset: null }; },
+  });
+  const page = await qdrant.listPoints({ userId: 1 });
+  assert.deepEqual(page.points, []);
+  assert.equal(page.nextOffset, null);
+});
+
+test('deletePoint passes the userId filter alongside the point id', async () => {
+  const qdrant = freshQdrant();
+  let deleteArgs = null;
+  qdrant._setClientForTests({
+    async collectionExists() { return { exists: true }; },
+    async getCollection() { return { config: { params: { vectors: { size: qdrant.EMBEDDING_DIM } } } }; },
+    async delete(collection, args) { deleteArgs = args; },
+  });
+  await qdrant.deletePoint({ id: 'p9', userId: 7 });
+  assert.deepEqual(deleteArgs.points, [{ id: 'p9' }]);
+  assert.deepEqual(deleteArgs.filter, { must: [{ key: 'userId', match: { value: 7 } }] });
+  assert.equal(deleteArgs.wait, true);
+});
+
+test('updatePointText re-embeds and upserts preserving metadata, scoped to the owner', async () => {
+  const qdrant = freshQdrant();
+  const dim = qdrant.EMBEDDING_DIM;
+  const upserts = [];
+  let embedArg = null;
+  qdrant._setClientForTests({
+    async collectionExists() { return { exists: true }; },
+    async getCollection() { return { config: { params: { vectors: { size: dim } } } }; },
+    async retrieve(collection, args) {
+      assert.deepEqual(args.ids, ['p1']);
+      return [{ id: 'p1', payload: { userId: 42, text: 'old text', kind: 'message', role: 'user' } }];
+    },
+    async upsert(collection, args) { upserts.push(args); },
+  });
+
+  const updated = await qdrant.updatePointText({
+    id: 'p1', userId: 42, text: 'new text',
+    embed: (t) => { embedArg = t; return new Array(dim).fill(0.5); },
+  });
+
+  assert.equal(embedArg, 'new text');
+  assert.equal(upserts.length, 1);
+  assert.equal(upserts[0].points[0].id, 'p1');
+  assert.equal(upserts[0].points[0].payload.text, 'new text');
+  assert.equal(upserts[0].points[0].payload.userId, 42);
+  assert.equal(upserts[0].points[0].payload.kind, 'message', 'non-text metadata must survive');
+  assert.equal(upserts[0].points[0].vector.length, dim);
+  assert.deepEqual(updated.payload.text, 'new text');
+});
+
+test("updatePointText returns null for another user's point and never upserts", async () => {
+  const qdrant = freshQdrant();
+  let upsertCalls = 0;
+  qdrant._setClientForTests({
+    async collectionExists() { return { exists: true }; },
+    async getCollection() { return { config: { params: { vectors: { size: qdrant.EMBEDDING_DIM } } } }; },
+    async retrieve() { return [{ id: 'p1', payload: { userId: 999, text: 'not yours' } }]; },
+    async upsert() { upsertCalls += 1; },
+  });
+  const updated = await qdrant.updatePointText({
+    id: 'p1', userId: 42, text: 'hijack', embed: () => new Array(qdrant.EMBEDDING_DIM).fill(0),
+  });
+  assert.equal(updated, null);
+  assert.equal(upsertCalls, 0);
+});
+
+test('updatePointText returns null when the point does not exist', async () => {
+  const qdrant = freshQdrant();
+  qdrant._setClientForTests({
+    async collectionExists() { return { exists: true }; },
+    async getCollection() { return { config: { params: { vectors: { size: qdrant.EMBEDDING_DIM } } } }; },
+    async retrieve() { return []; },
+    async upsert() { throw new Error('must not be called'); },
+  });
+  assert.equal(await qdrant.updatePointText({ id: 'nope', userId: 1, text: 'x', embed: () => [] }), null);
+});

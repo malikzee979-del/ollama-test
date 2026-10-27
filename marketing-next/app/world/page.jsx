@@ -17,10 +17,12 @@ const HTML = `
         <div class="phi-tiles">
           <i class="t-side"></i><i class="t-road"></i><i class="t-bldg"></i><i class="t-water"></i><i class="t-side"></i>
           <i class="t-road"></i><i class="t-side"></i><i class="t-bldg"></i><i class="t-water"></i><i class="t-road"></i>
-          <i class="t-side"></i><i class="t-park"></i><i class="t-bldg"></i><i class="t-road"></i><i class="t-side"></i>
+          <i class="t-side"></i><i class="t-park"></i><i class="t-bldg"></i><i class="t-water"></i><i class="t-road"></i>
           <i class="t-road"></i><i class="t-side"></i><i class="t-bldg"></i><i class="t-water"></i><i class="t-road"></i>
           <i class="t-side"></i><i class="t-road"></i><i class="t-park"></i><i class="t-water"></i><i class="t-side"></i>
         </div>
+        <p class="phi-cap mono">fig. 01 — the city, from above · 5 tile types</p>
+      </div>
       </div>
     </div>
   </section>
@@ -147,7 +149,7 @@ const HTML = `
     <div class="wrap closing-wrap">
       <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>the city is idling</p>
       <h2 id="close-h" class="display closing-h reveal">Go see it<br><span class="grad">for yourself.</span></h2>
-      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <a class="nav-cta cta-big reveal" href="/game">▶ Play Local Theft Auto</a>
       <p class="closing-note mono reveal">Same city every time · rendered fresh, never stored</p>
     </div>
   </section>

@@ -1,0 +1,204 @@
+- generic [active] [ref=f7e1]:
+  - banner [ref=f7e2]:
+    - generic [ref=f7e3]:
+      - link "Local Theft Auto — home" [ref=f7e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f7e6]: Local Theft Auto
+      - navigation "Primary" [ref=f7e7]:
+        - link "World" [ref=f7e8] [cursor=pointer]:
+          - /url: /world
+        - link "Vehicles" [ref=f7e9] [cursor=pointer]:
+          - /url: /driving
+        - link "Missions" [ref=f7e10] [cursor=pointer]:
+          - /url: /missions
+        - link "Wanted" [ref=f7e11] [cursor=pointer]:
+          - /url: /wanted
+        - link "Progression" [ref=f7e12] [cursor=pointer]:
+          - /url: /progression
+        - link "FAQ" [ref=f7e13] [cursor=pointer]:
+          - /url: /faq
+      - link "▶ Play now" [ref=f7e14] [cursor=pointer]:
+        - /url: /game
+  - main [ref=f7e15]:
+    - region [ref=f7e16]:
+      - generic [ref=f7e17]:
+        - generic [ref=f7e18]:
+          - paragraph [ref=f7e19]: now playable · zero network
+          - heading "A whole city. Zero bytes leave your machine." [level=1] [ref=f7e21]
+          - paragraph [ref=f7e22]:
+            - text: "Local Theft Auto is a top-down, GTA-style city rendered on one <canvas>: lane-disciplined traffic, panicking pedestrians, a police force that pursues with lead prediction, six mission types, and a garage that remembers your car. No server, no accounts, no telemetry —"
+            - strong [ref=f7e23]: the only thing you can steal is the high score.
+          - generic [ref=f7e24]:
+            - generic [ref=f7e25]:
+              - link "▶ Start driving" [ref=f7e26] [cursor=pointer]:
+                - /url: /game
+              - generic [ref=f7e27]: ▸ 0 install · saves to this browser
+            - link "See the city up close" [ref=f7e28] [cursor=pointer]:
+              - /url: /world
+              - text: See the city up close →
+          - list "Key facts" [ref=f7e29]:
+            - listitem [ref=f7e30]: 0 install
+            - listitem [ref=f7e31]: 60fps canvas
+            - listitem [ref=f7e32]: 0 bytes out
+        - generic [ref=f7e34]:
+          - generic "3D night city with moving traffic — drag to rotate" [ref=f7e35]
+          - generic [aria-hidden] [ref=f7e37]: 0 bytes out
+          - generic [aria-hidden] [ref=f7e38]: localStorage saves
+          - generic [aria-hidden] [ref=f7e39]: drag the city — it's 3D
+    - region "Local Theft Auto in numbers" [ref=f7e40]:
+      - generic [ref=f7e42]:
+        - generic [ref=f7e43]:
+          - term [ref=f7e44]: bytes of gameplay sent to a server
+          - definition [ref=f7e45]: "0"
+        - generic [ref=f7e46]:
+          - term [ref=f7e47]: mission types on the contract board
+          - definition [ref=f7e48]: "6"
+        - generic [ref=f7e49]:
+          - term [ref=f7e50]: wanted stars before a helicopter joins in
+          - definition [ref=f7e51]: "4"
+        - generic [ref=f7e52]:
+          - term [ref=f7e53]: frames per second on a plain <canvas>
+          - definition [ref=f7e54]: "60"
+    - region [ref=f7e55]:
+      - generic [ref=f7e56]:
+        - generic [ref=f7e57]:
+          - generic [aria-hidden]: "01"
+          - paragraph [ref=f7e58]: every system, one page each
+          - heading "One city. Seven ways to break the law in it." [level=2] [ref=f7e60]
+        - generic [ref=f7e61]:
+          - article [ref=f7e62]:
+            - heading "The open world" [level=3] [ref=f7e63]
+            - paragraph [ref=f7e64]: "96×96 tiles of hashed city, deterministic on every reload: a river with real bridges, a stadium block, parks, sidewalks, and four corner services tucked into the grid."
+            - link "Explore the city" [ref=f7e65] [cursor=pointer]:
+              - /url: /world
+              - text: Explore the city
+              - generic [aria-hidden] [ref=f7e66]: →
+          - article [ref=f7e67]:
+            - heading "Vehicles & driving" [level=3] [ref=f7e68]
+            - paragraph [ref=f7e69]: Drift-on-handbrake physics, per-car handling rolls, headlights and brake lights, damage and wrecks, gas stations that repair for cash.
+            - link "See how driving feels" [ref=f7e70] [cursor=pointer]:
+              - /url: /driving
+              - text: See how driving feels
+              - generic [aria-hidden] [ref=f7e71]: →
+          - article [ref=f7e72]:
+            - heading "Missions & heists" [level=3] [ref=f7e73]
+            - paragraph [ref=f7e74]: Delivery runs, checkpoint circuits, steal contracts, ram jobs and a VIP escort — a new job posts itself whenever you're between crimes.
+            - link "Read the contract board" [ref=f7e75] [cursor=pointer]:
+              - /url: /missions
+              - text: Read the contract board
+              - generic [aria-hidden] [ref=f7e76]: →
+          - article [ref=f7e77]:
+            - heading "The wanted system" [level=3] [ref=f7e78]
+            - paragraph [ref=f7e79]: Zero to five stars, roadblocks from three, a helicopter from four. Hide in a park, respray at the paint shop, or bribe the corner mart.
+            - link "Learn to evade" [ref=f7e80] [cursor=pointer]:
+              - /url: /wanted
+              - text: Learn to evade
+              - generic [aria-hidden] [ref=f7e81]: →
+          - article [ref=f7e82]:
+            - heading "Combat" [level=3] [ref=f7e83]
+            - paragraph [ref=f7e84]: A punch on foot, a bat if you find one, pedestrians who scatter and cops who get briefly stunned — comedy, not gore.
+            - link "See the moveset" [ref=f7e85] [cursor=pointer]:
+              - /url: /combat
+              - text: See the moveset
+              - generic [aria-hidden] [ref=f7e86]: →
+          - article [ref=f7e87]:
+            - heading "Progression" [level=3] [ref=f7e88]
+            - paragraph [ref=f7e89]: A high score, five achievements, lifetime stats, and a garage that saves your car's paint and handling to this browser between runs.
+            - link "Check the save file" [ref=f7e90] [cursor=pointer]:
+              - /url: /progression
+              - text: Check the save file
+              - generic [aria-hidden] [ref=f7e91]: →
+          - article [ref=f7e92]:
+            - heading "Controls & accessibility" [level=3] [ref=f7e93]
+            - paragraph [ref=f7e94]: Full keyboard scheme, on-screen touch pads on phones, three difficulty knobs, and a peaceful mode that turns the heat off entirely.
+            - link "See every key" [ref=f7e95] [cursor=pointer]:
+              - /url: /controls
+              - text: See every key
+              - generic [aria-hidden] [ref=f7e96]: →
+    - region [ref=f7e97]:
+      - generic [ref=f7e98]:
+        - heading "No server to reach, so nothing to leak." [level=2] [ref=f7e99]
+        - paragraph [ref=f7e100]: The whole simulation — traffic, police, missions, physics — runs in one script tag in your tab. Progress is saved to this browser's localStorage and nowhere else.
+        - link "See how the police work" [ref=f7e101] [cursor=pointer]:
+          - /url: /wanted
+          - text: See how the police work
+          - generic [aria-hidden] [ref=f7e102]: →
+    - region [ref=f7e103]:
+      - generic [ref=f7e104]:
+        - generic [ref=f7e105]:
+          - generic [aria-hidden]: "02"
+          - paragraph [ref=f7e106]: three ways to play
+          - heading "Keyboard, touchscreen, or just watch the marquee." [level=2] [ref=f7e108]
+        - generic [ref=f7e109]:
+          - generic [ref=f7e110]:
+            - generic [ref=f7e112]:
+              - text: desktop
+              - heading "WASD and a mouse-free HUD" [level=3] [ref=f7e113]
+              - paragraph [ref=f7e114]: Walk, drive, punch, honk and pause — every action has a key, and the overlay lists all of them before you start.
+            - code [ref=f7e115]: W A S D · E · F · SPACE
+          - generic [ref=f7e116]:
+            - generic [ref=f7e118]:
+              - text: phone
+              - heading "On-screen touch pads" [level=3] [ref=f7e119]
+              - paragraph [ref=f7e120]: Coarse-pointer devices get a D-pad plus action buttons overlaid on the canvas automatically — no separate mobile build.
+            - code [ref=f7e121]: no install · same file
+          - generic [ref=f7e122]:
+            - generic [ref=f7e124]:
+              - text: endless
+              - heading "A run that never really ends" [level=3] [ref=f7e125]
+              - paragraph [ref=f7e126]: Getting busted resets your wanted level, not your progress — score, stats and achievements persist until you press R.
+            - code [ref=f7e127]: R — fresh city, same save
+        - link "See what gets saved" [ref=f7e128] [cursor=pointer]:
+          - /url: /progression
+          - text: See what gets saved
+          - generic [aria-hidden] [ref=f7e129]: →
+    - region [ref=f7e130]:
+      - generic [ref=f7e131]:
+        - paragraph [ref=f7e132]: the engine is idling
+        - heading "Steal the wheel. Keep the high score." [level=2] [ref=f7e134]: Steal the wheel.Keep the high score.
+        - link "▶ Play Local Theft Auto" [ref=f7e135] [cursor=pointer]:
+          - /url: /game
+        - paragraph [ref=f7e136]: Runs in any modern browser · no build step · nothing leaves this tab
+  - contentinfo [ref=f7e137]:
+    - generic [ref=f7e138]:
+      - generic [ref=f7e139]:
+        - paragraph [ref=f7e140]:
+          - generic [ref=f7e142]: Local Theft Auto
+        - paragraph [ref=f7e143]: A top-down city that runs entirely in your browser tab. One canvas, one script, zero network calls — the only thing you can steal is the high score.
+      - navigation "The game" [ref=f7e144]:
+        - paragraph [ref=f7e145]: The game
+        - link "World" [ref=f7e146] [cursor=pointer]:
+          - /url: /world
+        - link "Vehicles" [ref=f7e147] [cursor=pointer]:
+          - /url: /driving
+        - link "Missions" [ref=f7e148] [cursor=pointer]:
+          - /url: /missions
+        - link "Wanted" [ref=f7e149] [cursor=pointer]:
+          - /url: /wanted
+      - navigation "Playing" [ref=f7e150]:
+        - paragraph [ref=f7e151]: Playing
+        - link "Combat" [ref=f7e152] [cursor=pointer]:
+          - /url: /combat
+        - link "Progression" [ref=f7e153] [cursor=pointer]:
+          - /url: /progression
+        - link "Controls" [ref=f7e154] [cursor=pointer]:
+          - /url: /controls
+        - link "FAQ" [ref=f7e155] [cursor=pointer]:
+          - /url: /faq
+      - generic [ref=f7e156]:
+        - paragraph [ref=f7e157]: Quick start
+        - paragraph [ref=f7e158]: WASD — walk / drive
+        - paragraph [ref=f7e159]: E — enter or exit a car
+        - paragraph [ref=f7e160]: F — punch or swing
+        - link "Open game →" [ref=f7e161] [cursor=pointer]:
+          - /url: /game
+    - generic [ref=f7e162]:
+      - paragraph [ref=f7e163]:
+        - text: © 2026 Local Theft Auto — local by design. Built inside the
+        - link "Ollama Chat" [ref=f7e164] [cursor=pointer]:
+          - /url: /about
+        - text: project.
+      - link "Back to top ↑" [ref=f7e165] [cursor=pointer]:
+        - /url: "#top"
+  - button "Open chat with your local Ollama" [ref=f7e167] [cursor=pointer]
+  - alert [ref=f7e172]

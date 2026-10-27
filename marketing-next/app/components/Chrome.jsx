@@ -32,7 +32,8 @@ export function Nav() {
   }, []);
   const links = [
     ["/world", "World"], ["/driving", "Vehicles"], ["/missions", "Missions"],
-    ["/wanted", "Wanted"], ["/progression", "Progression"], ["/faq", "FAQ"],
+    ["/wanted", "Wanted"], ["/combat", "Combat"], ["/progression", "Progression"],
+    ["/faq", "FAQ"],
   ];
   return (
     <header id="nav" ref={navRef}>

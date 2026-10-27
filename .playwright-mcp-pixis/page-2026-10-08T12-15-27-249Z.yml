@@ -1,0 +1,101 @@
+- generic [active] [ref=f24e1]:
+  - main [ref=f24e2]:
+    - generic [ref=f24e3]:
+      - region [ref=f24e4]:
+        - generic [ref=f24e6]:
+          - paragraph [ref=f24e7]: now playable · zero network
+          - heading "Local Theft Auto. Your crimes never leave the machine." [level=1] [ref=f24e9]
+          - paragraph [ref=f24e10]: "A top-down city rendered entirely in your browser: cars to borrow, amber packages to collect, pedestrians to respect, and a local police force that enforces local law. No server, no telemetry — the only thing you can steal is the high score."
+      - region "Local Theft Auto game" [ref=f24e11]:
+        - generic [ref=f24e12]:
+          - generic [ref=f24e14]:
+            - 'generic "Local Theft Auto: a top-down city driving game. Use the keyboard to play." [ref=f24e15]'
+            - generic [ref=f24e16]:
+              - paragraph [ref=f24e17]: a toy city · no network · no pixels leave your machine
+              - heading "Local Theft Auto" [level=2] [ref=f24e18]
+              - list "Controls" [ref=f24e19]:
+                - listitem [ref=f24e20]:
+                  - generic [ref=f24e21]: W A S D
+                  - text: /
+                  - generic [ref=f24e22]: ← ↑ ↓ →
+                  - text: walk & drive
+                - listitem [ref=f24e23]:
+                  - generic [ref=f24e24]: E
+                  - text: enter / exit a car
+                - listitem [ref=f24e25]:
+                  - generic [ref=f24e26]: SPACE
+                  - text: handbrake ·
+                  - generic [ref=f24e27]: F
+                  - text: punch / swing ·
+                  - generic [ref=f24e28]: H
+                  - text: horn
+                - listitem [ref=f24e29]:
+                  - generic [ref=f24e30]: P
+                  - text: pause ·
+                  - generic [ref=f24e31]: M
+                  - text: mute ·
+                  - generic [ref=f24e32]: R
+                  - text: "restart · touch: pads &"
+                  - generic [ref=f24e33]: P
+                  - text: /
+                  - generic [ref=f24e34]: M
+                  - text: /
+                  - generic [ref=f24e35]: H
+                  - text: buttons
+                - listitem [ref=f24e36]:
+                  - generic [ref=f24e37]: 1 2 3
+                  - text: "while paused: traffic · police · peaceful mode ·"
+                  - generic [ref=f24e38]: 4 5
+                  - text: skin & shirt
+                - listitem [ref=f24e39]:
+                  - generic [ref=f24e40]: ●
+                  - text: collect the amber packages
+                - listitem [ref=f24e41]:
+                  - generic [ref=f24e42]: ★
+                  - text: don’t run over the locals
+              - button "Start driving" [ref=f24e43]
+              - paragraph [ref=f24e44]: BEST 0 · 0 steals · 0 deliveries · 0/6 achievements
+          - paragraph [ref=f24e45]: rendered on <canvas> at 60fps · pedestrians respawn · the police forgive, eventually
+  - contentinfo [ref=f24e46]:
+    - generic [ref=f24e47]:
+      - generic [ref=f24e48]:
+        - paragraph [ref=f24e49]:
+          - generic [ref=f24e51]: Local Theft Auto
+        - paragraph [ref=f24e52]: A top-down city that runs entirely in your browser tab. One canvas, one script, zero network calls — the only thing you can steal is the high score.
+      - navigation "The game" [ref=f24e53]:
+        - paragraph [ref=f24e54]: The game
+        - link "World" [ref=f24e55] [cursor=pointer]:
+          - /url: /world
+        - link "Vehicles" [ref=f24e56] [cursor=pointer]:
+          - /url: /driving
+        - link "Missions" [ref=f24e57] [cursor=pointer]:
+          - /url: /missions
+        - link "Wanted" [ref=f24e58] [cursor=pointer]:
+          - /url: /wanted
+      - navigation "Playing" [ref=f24e59]:
+        - paragraph [ref=f24e60]: Playing
+        - link "Combat" [ref=f24e61] [cursor=pointer]:
+          - /url: /combat
+        - link "Progression" [ref=f24e62] [cursor=pointer]:
+          - /url: /progression
+        - link "Controls" [ref=f24e63] [cursor=pointer]:
+          - /url: /controls
+        - link "FAQ" [ref=f24e64] [cursor=pointer]:
+          - /url: /faq
+      - generic [ref=f24e65]:
+        - paragraph [ref=f24e66]: Quick start
+        - paragraph [ref=f24e67]: WASD — walk / drive
+        - paragraph [ref=f24e68]: E — enter or exit a car
+        - paragraph [ref=f24e69]: F — punch or swing
+        - link "Open game →" [ref=f24e70] [cursor=pointer]:
+          - /url: /game
+    - generic [ref=f24e71]:
+      - paragraph [ref=f24e72]:
+        - text: © 2026 Local Theft Auto — local by design. Built inside the
+        - link "Ollama Chat" [ref=f24e73] [cursor=pointer]:
+          - /url: /about
+        - text: project.
+      - link "Back to top ↑" [ref=f24e74] [cursor=pointer]:
+        - /url: "#top"
+  - button "Open chat with your local Ollama" [ref=f24e76] [cursor=pointer]
+  - alert [ref=f24e81]

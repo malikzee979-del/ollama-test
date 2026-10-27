@@ -1,0 +1,14 @@
+- generic [active] [ref=f12e1]:
+  - heading "Directory listing for /game/" [level=1] [ref=f12e2]
+  - separator [ref=f12e3]
+  - list [ref=f12e4]:
+    - listitem [ref=f12e5]:
+      - link "__next._full.txt" [ref=f12e6] [cursor=pointer]:
+        - /url: __next._full.txt
+    - listitem [ref=f12e7]:
+      - link "__next._tree.txt" [ref=f12e8] [cursor=pointer]:
+        - /url: __next._tree.txt
+    - listitem [ref=f12e9]:
+      - link "__next.game.__PAGE__.txt" [ref=f12e10] [cursor=pointer]:
+        - /url: __next.game.__PAGE__.txt
+  - separator [ref=f12e11]

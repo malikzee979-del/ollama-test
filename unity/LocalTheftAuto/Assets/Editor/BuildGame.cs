@@ -2,6 +2,7 @@
    Unity -quit -batchmode -projectPath <project> -executeMethod BuildGame.Build
    Produces Builds/LocalTheftAuto.app */
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
@@ -9,6 +10,8 @@ public static class BuildGame
 {
     public static void Build()
     {
+        PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+
         var options = new BuildPlayerOptions
         {
             scenes = new[] { "Assets/Scenes/Main.unity" },

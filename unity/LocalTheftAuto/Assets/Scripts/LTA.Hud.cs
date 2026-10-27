@@ -18,6 +18,8 @@ namespace LocalTheftAuto
 
         Text[] stars = new Text[5];
         Text scoreText, speedText, missionText, ammoText, compassArrow, compassDist;
+        Text statsText;   // F19 slice: lifetime stats line, pause menu only
+        Text comboText;   // F19 slice: live ×2/×3/×4 style-combo readout
         Image barBack, barFill;
         RawImage minimap;
         Image mmFrame;
@@ -147,6 +149,12 @@ namespace LocalTheftAuto
             }
             scoreText = UiText("score", root, "", 13, Cfg.Hex("#e9edf4"), TextAnchor.UpperLeft);
             TopLeft(Rt(scoreText.gameObject), 16, 40);
+            // F19 slice: live style-combo readout (×2/×3/×4) — amber like the
+            // score, hidden except while a combo window is open.
+            comboText = UiText("combo", root, "", 13, Amber, TextAnchor.UpperLeft);
+            comboText.fontStyle = FontStyle.Bold;
+            TopLeft(Rt(comboText.gameObject), 16, 22);
+            comboText.gameObject.SetActive(false);
             speedText = UiText("speed", root, "", 13, Cfg.Hex("#e9edf4"), TextAnchor.UpperLeft);
             TopLeft(Rt(speedText.gameObject), 16, 58);
             missionText = UiText("mission", root, "", 13, Cfg.Hex("#4fb4ff"), TextAnchor.UpperLeft);
@@ -332,6 +340,12 @@ namespace LocalTheftAuto
             });
             MakeMenuButton(pageMain.transform, "quit", "QUIT", -156, QuitToDesktop);
 
+            // F19 slice: lifetime stats/achievements readout under the buttons.
+            // Re-read every time the pause menu is shown (see ShowPage) — the
+            // values only move while driving, never while the menu is open.
+            statsText = UiText("stats", pageMain.transform, "", 12, new Color(1, 1, 1, 0.45f), TextAnchor.MiddleCenter);
+            PlaceCenter(statsText, -196);
+
             // settings page — master volume as −/+ steppers, NOT a Slider:
             // the project has no Selectable plumbing beyond Button, and a
             // Slider needs background/fill/handle RectTransforms that don't
@@ -426,6 +440,7 @@ namespace LocalTheftAuto
                 page = MenuPage.Main;
                 ApplyPage();
                 RefreshVolumeText();
+                if (statsText != null) statsText.text = StatsSys.StatsLine();
             }
             else
             {
@@ -820,8 +835,11 @@ namespace LocalTheftAuto
                 Blit(data.Packages[i].X / Cfg.Tile * s, data.Packages[i].Y / Cfg.Tile * s, 3, Amber);
             for (int i = 0; i < data.Cops.Count; i++)
                 Blit(data.Cops[i].X / Cfg.Tile * s, data.Cops[i].Y / Cfg.Tile * s, 4, Cfg.Hex("#ff5252"));
-            if (data.State.MissionOn)
-                Blit(data.State.MissionX / Cfg.Tile * s, data.State.MissionY / Cfg.Tile * s, 4, Cfg.Hex("#4fb4ff"));
+            // Slice 2: the mission blip tracks the live target (ram car / VIP),
+                // same dispatch as the compass and world marker.
+                Vector2 mmTarget;
+                if (MissionSys.MissionTarget(data, out mmTarget))
+                    Blit(mmTarget.x / Cfg.Tile * s, mmTarget.y / Cfg.Tile * s, 4, Cfg.Hex("#4fb4ff"));
 
             // player arrow: a 3px body plus one pixel ahead
             float px = data.Player.X / Cfg.Tile * s;
@@ -860,6 +878,13 @@ namespace LocalTheftAuto
             // mode sets Started before the HUD exists) — keep the overlay honest
             if (s.Started && startPanel.activeSelf) startPanel.SetActive(false);
 
+            // F19 slice: live style-combo readout. Decay is sim-time based, so
+            // the ×N badge lives while the combo window (4s) is open and fades
+            // out on its own — no extra timer plumbing needed.
+            int mult = StatsSys.ComboMult;
+            comboText.gameObject.SetActive(s.Started && mult > 1);
+            if (mult > 1) comboText.text = "\u00d7" + mult + " style";
+
             for (int i = 0; i < 5; i++)
                 stars[i].color = i < s.Wanted ? Amber : new Color(1, 1, 1, 0.16f);
 
@@ -883,6 +908,16 @@ namespace LocalTheftAuto
                         label = Cfg.GangNames[s.GangWarGang].ToUpper() + " DOWN "
                             + s.GangWarCount + "/" + s.GangWarGoal;
                         break;
+                    case MissionKind.Circuit:
+                        label = "CIRCUIT " + s.CircuitIndex + "/"
+                            + (s.CircuitCps != null ? s.CircuitCps.Count : 0);
+                        break;
+                    case MissionKind.Ram:
+                        label = "WRECK THE MARKED CAR";
+                        break;
+                    case MissionKind.Escort:
+                        label = s.VipFollowing ? "ESCORT TO THE MARKER" : "PICK UP THE VIP";
+                        break;
                     default:
                         label = "DELIVERY";
                         break;
@@ -895,21 +930,20 @@ namespace LocalTheftAuto
             }
             else missionText.text = "";
 
-            // mission compass: bearing arrow + distance for the mission kinds
-            // that have a map coordinate (Delivery and Steal drop-offs — the
-            // same condition GameLoop.SyncMission uses for the world marker;
+            // mission compass: bearing arrow + distance for every kind that has a
+            // pointable target (Slice 2: MissionTarget is the single
+            // dispatch, same contract as SyncMission's world marker —
             // Rampage/GangWar have no fixed point). Bearing is measured
             // against the ACTUAL chase-camera yaw (GameLoop.CamYaw), not the
             // player heading: the camera lags through swings and the arrow
             // must match the screen, not the sim.
-            bool compass = s.MissionOn
-                && s.MissionKind != MissionKind.Rampage
-                && s.MissionKind != MissionKind.GangWar;
+            Vector2 compassTarget;
+            bool compass = MissionSys.MissionTarget(data, out compassTarget);
             compassArrow.gameObject.SetActive(compass);
             compassDist.gameObject.SetActive(compass);
             if (compass)
             {
-                float mdx = s.MissionX - p.X, mdy = s.MissionY - p.Y;
+                float mdx = compassTarget.x - p.X, mdy = compassTarget.y - p.Y;
                 float mlen = Mathf.Sqrt(mdx * mdx + mdy * mdy);
                 // JS plane -> Unity XZ (z = -jsY); signed angle from the
                 // camera forward, positive = screen right (Unity yaw is

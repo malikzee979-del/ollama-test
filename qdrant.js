@@ -112,6 +112,62 @@ async function searchByVector(vector, { limit = 5, scoreThreshold, filter } = {}
   return results.map((r) => ({ id: r.id, score: r.score, payload: r.payload }));
 }
 
+// Lists a page of this user's stored memory points (7.8 memory editing).
+// Scrolls by payload filter (userId) rather than by vector — no embedding
+// call needed to *see* what's stored. Returns [{ id, payload }, ...] plus
+// `nextOffset` for pagination (null/undefined when exhausted).
+async function listPoints({ userId, limit = 50, offset } = {}) {
+  await ensureCollection();
+  const res = await withCollectionRetry(() => client.scroll(QDRANT_COLLECTION, {
+    limit,
+    offset,
+    with_payload: true,
+    filter: { must: [{ key: 'userId', match: { value: userId } }] },
+  }));
+  return {
+    points: (res.points || []).map((p) => ({ id: p.id, payload: p.payload })),
+    nextOffset: res.next_page_offset ?? null,
+  };
+}
+
+// Deletes one point by id, scoped to the owning user via a payload filter —
+// a caller can therefore never delete another account's memory point even
+// with a guessed id (Qdrant only deletes points matching BOTH filters).
+async function deletePoint({ id, userId }) {
+  await ensureCollection();
+  await withCollectionRetry(() => client.delete(QDRANT_COLLECTION, {
+    wait: true,
+    points: [{ id }],
+    filter: { must: [{ key: 'userId', match: { value: userId } }] },
+  }));
+}
+
+// Replaces a point's text payload by re-embedding the new text and
+// upserting at the same id with the original metadata (7.8). Scoped like
+// deletePoint: the read must match the user's filter first.
+async function updatePointText({ id, userId, text, embed }) {
+  await ensureCollection();
+  const res = await withCollectionRetry(() => client.retrieve(QDRANT_COLLECTION, {
+    ids: [id],
+    with_payload: true,
+  }));
+  const existing = (res && res[0]) || null;
+  if (!existing || !existing.payload || existing.payload.userId !== userId) {
+    return null; // not found, or belongs to another user
+  }
+  // Keep everything except the text being replaced — spread the rest
+  // through so kind/role/docName etc. survive the edit. (userId is
+  // re-set explicitly below.)
+  const metadata = { ...existing.payload };
+  delete metadata.text;
+  const vector = await embed(text);
+  await withCollectionRetry(() => client.upsert(QDRANT_COLLECTION, {
+    wait: true,
+    points: [{ id, vector, payload: { ...metadata, userId, text } }],
+  }));
+  return { id, payload: { ...metadata, userId, text } };
+}
+
 module.exports = {
   QDRANT_URL,
   QDRANT_COLLECTION,
@@ -119,6 +175,9 @@ module.exports = {
   checkConnection,
   upsertPoint,
   searchByVector,
+  listPoints,
+  deletePoint,
+  updatePointText,
   ensureCollection,
   _setClientForTests,
 };

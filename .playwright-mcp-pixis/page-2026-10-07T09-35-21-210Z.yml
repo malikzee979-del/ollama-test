@@ -1,0 +1,41 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - button "New chat" [ref=e5] [cursor=pointer]
+    - generic [ref=e10]:
+      - generic [ref=e11]: Checking Ollama…
+      - button "Toggle light/dark theme" [ref=e14] [cursor=pointer]:
+        - generic [ref=e18]: Dark mode
+      - button "Settings" [ref=e19] [cursor=pointer]
+      - button "Log out" [ref=e25] [cursor=pointer]
+  - button "Toggle sidebar" [expanded] [ref=e26] [cursor=pointer]
+  - main [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Choose a model
+        - combobox "Choose a model" [ref=e33] [cursor=pointer]
+        - button "Refresh models" [ref=e34] [cursor=pointer]
+        - searchbox "Search chats" [ref=e39]
+      - generic [ref=e40]: New chat
+      - generic [ref=e41]:
+        - button "Toggle light/dark theme" [ref=e42] [cursor=pointer]
+        - button "Export" [ref=e47] [cursor=pointer]
+        - button "Clear" [ref=e48] [cursor=pointer]
+    - generic [ref=e50]:
+      - heading "What can I help with?" [level=1] [ref=e55]
+      - paragraph [ref=e56]: Local models on your own hardware — pick one above and start typing. Nothing you type or generate leaves this machine.
+    - generic [ref=e57]:
+      - generic [ref=e59]:
+        - button "Choose File" [ref=e60]
+        - button "Attach text file(s)" [ref=e61] [cursor=pointer]
+        - generic [ref=e64]: Message your local model
+        - textbox "Message your local model" [ref=e65]:
+          - /placeholder: Message your local model…
+        - button "Send message" [ref=e66] [cursor=pointer]
+      - generic [ref=e69]:
+        - generic [ref=e70]: Enter
+        - text: to send
+        - generic [aria-hidden] [ref=e71]: ·
+        - generic [ref=e72]: Shift+Enter
+        - text: for a new line
+        - generic [aria-hidden] [ref=e73]: ·
+        - generic [ref=e74]: 3 text files max, 200KB each

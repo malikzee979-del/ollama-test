@@ -83,7 +83,7 @@ const HTML = `
     <div class="wrap closing-wrap">
       <p class="eyebrow mono reveal"><span class="tick" aria-hidden="true"></span>find one and floor it</p>
       <h2 id="close-h" class="display closing-h reveal">Steal a car.<br><span class="grad">See what it's got.</span></h2>
-      <a class="nav-cta cta-big reveal" href="game.html">▶ Play Local Theft Auto</a>
+      <a class="nav-cta cta-big reveal" href="/game">▶ Play Local Theft Auto</a>
       <p class="closing-note mono reveal">E to enter · SPACE to drift · every car rolls different</p>
     </div>
   </section>

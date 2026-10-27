@@ -92,7 +92,7 @@ road/building layout itself never changes.
 | File | Responsibility | JS counterpart |
 | --- | --- | --- |
 | `LTA.Core.cs` | constants, JS-exact hashing, tile map queries, game state, entity data | `blockHash`, `hash2`, `tileType`, `circleHitsBuilding`, globals |
-| `LTA.Systems.cs` | spawning, traffic AI, pedestrians, police/wanted, pickups, particles | `spawnWorld`, `trafficStep`, `pedStep`, `copStep`, `lawStep`, `pickupStep`, `particlesStep` |
+| `LTA.Systems.cs` | spawning, traffic AI, pedestrians, police/wanted, pickups, particles, **turf economics** (clear/hold rewards) | `spawnWorld`, `trafficStep`, `pedStep`, `copStep`, `lawStep`, `pickupStep`, `particlesStep` |
 | `LTA.Player.cs` | on-foot + car physics (drift, damage, collisions), enter/exit | `playerStep`, `tryEnterExit` |
 | `LTA.Sprites.cs` | runtime-baked 2D textures (circles, glows, cone, skid, vignette) for overlays/HUD | `drawLights`, effects |
 | `LTA.Mesh3D.cs` | 3D mesh kit: face-shaded boxes, car/ped/tree/lamp/marker builders, JS→3D space mapping | — (new) |
@@ -232,9 +232,10 @@ Gameplay logic is data-only (`GameData` + systems), rendering is separate —
 so you can keep extending missions, combat, districts or save games without
 touching the physics/AI code. Natural starting points:
 
-- Turf economics: holding or clearing a corner could pay a recurring score
-  drip or spawn better crates — `PedEnt.Gang` and the spawn clusters in
-  `Systems.SpawnWorld` already mark each turf.
+- ~~Turf economics~~ — **landed**: each gang cluster's corner is a `TurfEnt`;
+  clearing it pays a lump and drops an SMG crate (`Systems.TurfStep`), and
+  standing inside a cleared turf pays a recurring drip on the sim clock.
+  Verified headless in `Assets/Editor/TurfSimTest.cs`.
 - More districts or a distinct waterfront/park district: extend
   `CityRenderer.District` — it's already isolated from `CityMap.TileType`.
 - Real art: swap `SpriteKit` bakes for imported sprites; the visual sync in

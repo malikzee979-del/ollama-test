@@ -2921,7 +2921,10 @@ html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-w
 .page-hero.ph-split .wrap { grid-template-columns: minmax(0, 8fr) minmax(0, 3fr); align-items: end; }
 @media (max-width: 960px) {
   .page-hero.ph-lean .wrap, .page-hero.ph-split .wrap { grid-template-columns: 1fr; }
-  .ph-instrument, .ph-spec { display: none; }
+  /* NOTE: the old `.ph-instrument { display: none }` lived here but was DEAD —
+     the base rule below re-declares display:flex later in the file, so the
+     instrument always rendered. Verified on paper at 390px it reads well
+     (ink plate + static caption), so the hide is removed intentionally. */
 }
 
 /* hero instrument — a CSS-only mini-visual mounted in a small port frame */
@@ -2968,13 +2971,22 @@ html.js .port.is-warm.reveal-depth.in-view::before { animation-name: port-land-w
 /* world — the five legend colours as a 5×5 abstracted map */
 .phi-tiles {
   display: grid;
-  grid-template-columns: repeat(5, 24px);
-  grid-auto-rows: 24px;
-  gap: 5px;
+  grid-template-columns: repeat(5, 32px);
+  grid-auto-rows: 32px;
+  gap: 6px;
 }
 .phi-tiles i {
   border-radius: 3px;
   border: 1px solid rgba(214, 186, 148, 0.18);
+}
+.phi-cap {
+  position: absolute;
+  left: 0; right: 0; bottom: -2.2rem;
+  text-align: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 .t-road { background: #2b2f37; } .t-side { background: #565c66; }
 .t-bldg { background: #7a5a3a; } .t-park { background: #3f6b45; }
@@ -4307,3 +4319,96 @@ main section a:not(.nav-cta):not(.b-more):not(.band-link):not(.ghost-link):not(.
 }
 .game-overlay p, .game-overlay li, .game-section p, .game-section li { color: rgba(253, 248, 239, 0.75) !important; }
 .game-overlay h3, .game-section h3, .game-title, .game-kicker { color: var(--paper) !important; }
+
+
+/* ==========================================================================
+   MUNICIPAL pass 16 — feature-page hero + port plates
+   --------------------------------------------------------------------------
+   The legacy PORT frame was a translucent dark-glass gradient: on the paper
+   ground it rendered as a washed gray box, and the fig.01 instruments inside
+   it were small and low-contrast. Municipal says flat print — the port
+   becomes a paper-2 plate with a 1px ink border, and the hero instrument
+   becomes a solid ink plate so its signage colors actually read.
+   ========================================================================== */
+
+/* ---- the port frame: flat paper plate, ink rule, stamped label ---- */
+.port {
+  background: var(--paper-2);
+  border: 1px solid var(--ink);
+  box-shadow: 0 18px 36px -22px rgba(20, 22, 28, 0.4);
+}
+.port::before {
+  color: var(--ink-2);
+  border: 1px solid var(--line-paper-strong);
+  clip-path: none;
+}
+.port::after { filter: none; }
+.port.is-warm::before { border-color: var(--line-paper-strong); }
+
+/* ---- the hero instrument: solid ink plate, paper rules, signal corner ---- */
+.ph-instrument {
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  min-height: 220px;
+  box-shadow: 0 18px 36px -22px rgba(20, 22, 28, 0.4);
+}
+.ph-instrument::before {
+  border-color: rgba(253, 248, 239, 0.28);
+  clip-path: none;
+}
+.ph-instrument::after {
+  background:
+    linear-gradient(var(--signal), var(--signal)) top right / 10px 2px no-repeat,
+    linear-gradient(var(--signal), var(--signal)) top right / 2px 10px no-repeat;
+}
+
+/* world fig. 01 — the 5 tile types at a size the plate can carry */
+.phi-tiles { grid-template-columns: repeat(5, 40px); grid-auto-rows: 40px; gap: 7px; }
+.phi-tiles i { border-color: rgba(253, 248, 239, 0.14); border-radius: 0; }
+.t-road  { background: #3a3f4b; }
+.t-side  { background: #6b7280; }
+.t-bldg  { background: #a3713f; }
+.t-park  { background: #3f8a55; }
+.t-water { background: #3a6ea5; }
+
+/* combat keycaps on the ink plate */
+.phi-keys i {
+  background: rgba(253, 248, 239, 0.08);
+  border-color: rgba(253, 248, 239, 0.4);
+  color: var(--paper);
+}
+.phi-keys i:last-child { border-color: var(--signal); color: #ff8f83; }
+
+/* faq tabs on the ink plate */
+.phi-tabs i { background: rgba(253, 248, 239, 0.06); border-color: rgba(253, 248, 239, 0.4); }
+.phi-tabs i::before { background: rgba(253, 248, 239, 0.4); }
+.phi-tabs i:nth-child(2) { border-color: rgba(253, 248, 239, 0.6); }
+.phi-tabs i:nth-child(3) { border-color: var(--signal); }
+
+/* instrument caption sits on paper now — keep it clear of the plate */
+.phi-cap { color: var(--ink-faint); }
+
+/* ---- page-hero rhythm: kill the dead band under the lede ---- */
+.page-hero { padding-bottom: clamp(var(--s5), 5vw, var(--s6)); }
+.page-hero h1 { margin-bottom: var(--s4); }
+
+/* the dashed lane-line under feature H1s: chunkier paint, clearly a mark */
+.page-hero .ph-copy h1::after {
+  width: clamp(96px, 22vw, 180px);
+  height: 4px;
+  margin-top: var(--s4);
+  background: repeating-linear-gradient(90deg,
+    var(--signal) 0 18px, transparent 18px 30px);
+  opacity: 1;
+}
+
+/* ledger row numerals read as paint stamps when a row is parked on */
+@media (prefers-reduced-motion: reduce) {
+  .street-thread i { animation: none !important; }
+}
+
+/* pass 16 fix — instrument caption on phones: static under the plate so it
+   can't be clipped by the plate edge or overlap the next section */
+@media (max-width: 880px) {
+  .phi-cap { position: static; margin-top: var(--s3); }
+}

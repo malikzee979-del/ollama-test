@@ -53,7 +53,7 @@ Shader "LTA/Lit"
             Tags { "LightMode" = "UniversalForward" }
 
             ZWrite On
-            Cull Back
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex vert
@@ -314,7 +314,7 @@ Shader "LTA/Lit"
 
             ZWrite On
             ZTest LEqual
-            Cull Back
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex shadowVert
@@ -364,7 +364,7 @@ Shader "LTA/Lit"
 
             ZWrite On
             ColorMask R
-            Cull Back
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex depthVert
@@ -392,7 +392,7 @@ Shader "LTA/Lit"
             Tags { "LightMode" = "DepthNormals" }
 
             ZWrite On
-            Cull Back
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex dnVert

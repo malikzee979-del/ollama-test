@@ -20,6 +20,7 @@ module.exports = [
       'python_app/**', // separate Python app (vendored venv JS is not ours)
       'scratchpad/**', // throwaway debug/demo scripts
       'public/fonts/**',
+      'public/vendor/**', // vendored third-party libraries (pdf.js), not our code
       'marketing/**', // plain-script browser game/site code, no build step (verified via node --check)
       'marketing-next/**', // separate Next.js project with its own tooling (build output not ours to lint)
       '.pixis/**', // agent scratch space and one-off scripts

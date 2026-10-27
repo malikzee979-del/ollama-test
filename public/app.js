@@ -13,11 +13,6 @@
   let chats = []; // session summaries from GET /api/sessions
   let activeChatId = null;
   let activeSession = null; // the open chat's full session (with messages)
-  let settings = loadSettings();
-  let models = [];
-  let abortController = null;
-  let sidebarCollapsed = false;
-  let pullController = null;
   let pendingAttachments = []; // [{ name, content, size }] staged for the next message
   let currentTheme = 'light';
 
@@ -44,16 +39,30 @@
     formatBytes,
     attachmentError,
     isImageAttachment,
+    isPdfAttachment,
     imageMimeType,
     buildOllamaMessages,
     estimateChatTokens,
     formatTokens,
     normalizeSettings,
+    cacheKeyFor,
+    templateVariables,
     chatToMarkdown,
     chatToJson,
     exportFilename,
     renderMarkdown,
+    suggestModel,
+    quantizationSuggestions,
+    enqueueOfflineSend,
+    shiftOfflineSend,
+    offlineQueueCount,
   } = window.ChatHelpers;
+
+  let settings = loadSettings();
+  let models = [];
+  let abortController = null;
+  let sidebarCollapsed = false;
+  let pullController = null;
 
   // ---------- Elements ----------
   const el = {
@@ -86,11 +95,72 @@
     emptyModelHint: document.getElementById('emptyModelHint'),
     composer: document.getElementById('composer'),
     promptInput: document.getElementById('promptInput'),
+    shortcutBar: document.getElementById('shortcutBar'),
     sendBtn: document.getElementById('sendBtn'),
     stopBtn: document.getElementById('stopBtn'),
     settingsOverlay: document.getElementById('settingsOverlay'),
     closeSettingsBtn: document.getElementById('closeSettingsBtn'),
-    ollamaHostDisplay: document.getElementById('ollamaHostDisplay'),
+    serverSelect: document.getElementById('serverSelect'),
+    presetSelect: document.getElementById('presetSelect'),
+    presetSaveBtn: document.getElementById('presetSaveBtn'),
+    presetDeleteBtn: document.getElementById('presetDeleteBtn'),
+    pinInput: document.getElementById('pinInput'),
+    pinAddBtn: document.getElementById('pinAddBtn'),
+    pinsList: document.getElementById('pinsList'),
+    templateName: document.getElementById('templateName'),
+    templateText: document.getElementById('templateText'),
+    templateAddBtn: document.getElementById('templateAddBtn'),
+    templatesList: document.getElementById('templatesList'),
+    memoryLoadBtn: document.getElementById('memoryLoadBtn'),
+    memoryPageInfo: document.getElementById('memoryPageInfo'),
+    memoryList: document.getElementById('memoryList'),
+    summarizeUrl: document.getElementById('summarizeUrl'),
+    summarizeUrlBtn: document.getElementById('summarizeUrlBtn'),
+    summarizeUrlResult: document.getElementById('summarizeUrlResult'),
+    useDocuments: document.getElementById('useDocuments'),
+    docFileInput: document.getElementById('docFileInput'),
+    docPickBtn: document.getElementById('docPickBtn'),
+    docFileName: document.getElementById('docFileName'),
+    docIndexBtn: document.getElementById('docIndexBtn'),
+    auditList: document.getElementById('auditList'),
+    webhookNameInput: document.getElementById('webhookNameInput'),
+    webhookUrlInput: document.getElementById('webhookUrlInput'),
+    webhookEventPull: document.getElementById('webhookEventPull'),
+    webhookEventSession: document.getElementById('webhookEventSession'),
+    webhookAddBtn: document.getElementById('webhookAddBtn'),
+    webhookList: document.getElementById('webhookList'),
+    tokenNameInput: document.getElementById('tokenNameInput'),
+    tokenCreateBtn: document.getElementById('tokenCreateBtn'),
+    tokenSecretBox: document.getElementById('tokenSecretBox'),
+    tokenList: document.getElementById('tokenList'),
+    shareBtn: document.getElementById('shareBtn'),
+    statsBtn: document.getElementById('statsBtn'),
+    metricsBtn: document.getElementById('metricsBtn'),
+    metricsOverlay: document.getElementById('metricsOverlay'),
+    metricsRefreshBtn: document.getElementById('metricsRefreshBtn'),
+    closeMetricsBtn: document.getElementById('closeMetricsBtn'),
+    metricsBody: document.getElementById('metricsBody'),
+    autoRoute: document.getElementById('autoRoute'),
+    modelsHealthBtn: document.getElementById('modelsHealthBtn'),
+    modelsHealthOverlay: document.getElementById('modelsHealthOverlay'),
+    modelsHealthRefreshBtn: document.getElementById('modelsHealthRefreshBtn'),
+    closeModelsHealthBtn: document.getElementById('closeModelsHealthBtn'),
+    modelsHealthBody: document.getElementById('modelsHealthBody'),
+    statsOverlay: document.getElementById('statsOverlay'),
+    closeStatsBtn: document.getElementById('closeStatsBtn'),
+    statsBody: document.getElementById('statsBody'),
+    compareBtn: document.getElementById('compareBtn'),
+    compareOverlay: document.getElementById('compareOverlay'),
+    closeCompareBtn: document.getElementById('closeCompareBtn'),
+    comparePrompt: document.getElementById('comparePrompt'),
+    compareModelList: document.getElementById('compareModelList'),
+    compareRunBtn: document.getElementById('compareRunBtn'),
+    councilRunBtn: document.getElementById('councilRunBtn'),
+    compareResults: document.getElementById('compareResults'),
+    paletteOverlay: document.getElementById('paletteOverlay'),
+    paletteInput: document.getElementById('paletteInput'),
+    paletteList: document.getElementById('paletteList'),
+    micBtn: document.getElementById('micBtn'),
     systemPrompt: document.getElementById('systemPrompt'),
     temperature: document.getElementById('temperature'),
     tempValue: document.getElementById('tempValue'),
@@ -98,6 +168,13 @@
     topPValue: document.getElementById('topPValue'),
     numCtx: document.getElementById('numCtx'),
     useMemory: document.getElementById('useMemory'),
+    responseCache: document.getElementById('responseCache'),
+    usageReportBtn: document.getElementById('usageReportBtn'),
+    usageReportBody: document.getElementById('usageReportBody'),
+    cleanupDays: document.getElementById('cleanupDays'),
+    cleanupPreviewBtn: document.getElementById('cleanupPreviewBtn'),
+    cleanupRunBtn: document.getElementById('cleanupRunBtn'),
+    cleanupPreviewBody: document.getElementById('cleanupPreviewBody'),
     deleteAllBtn: document.getElementById('deleteAllBtn'),
     downloadDataBtn: document.getElementById('downloadDataBtn'),
     installedModelsList: document.getElementById('installedModelsList'),
@@ -406,6 +483,19 @@
       const item = document.createElement('div');
       item.className = 'chat-item' + (chat.id === activeChatId ? ' active' : '');
       item.onclick = () => selectChat(chat.id);
+      // Keyboard reachability (7.17): the list was div-onclick only, which a
+      // keyboard user could never operate. role=button + tabindex + Enter /
+      // Space activation, and aria-current marks the open chat for screen
+      // readers.
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      if (chat.id === activeChatId) item.setAttribute('aria-current', 'true');
+      item.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          selectChat(chat.id);
+        }
+      };
 
       const title = document.createElement('span');
       title.className = 'title';
@@ -424,6 +514,18 @@
       el.chatList.appendChild(item);
     }
   }
+
+  // Arrow-key roving (7.17): with a chat item focused, Up/Down moves focus
+  // through the list like a proper listbox instead of scrolling the page.
+  el.chatList?.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const items = Array.from(el.chatList.querySelectorAll('.chat-item'));
+    const idx = items.indexOf(document.activeElement);
+    if (idx === -1) return;
+    e.preventDefault();
+    const next = items[idx + (e.key === 'ArrowDown' ? 1 : -1)];
+    if (next) next.focus();
+  });
 
   function renderMessages() {
     el.messages.innerHTML = '';
@@ -468,7 +570,10 @@
 
     const role = document.createElement('div');
     role.className = 'msg-role';
-    role.textContent = msg.role === 'user' ? 'You' : (msg.model || 'Assistant');
+    // The cached badge (7.13) only exists on live replies — it isn't a
+    // persisted field, and a reloaded chat has nothing to badge.
+    role.textContent = (msg.role === 'user' ? 'You' : (msg.model || 'Assistant'))
+      + (msg.cached ? ' · cached' : '');
 
     const content = document.createElement('div');
     content.className = 'msg-content';
@@ -501,6 +606,30 @@
       actions.appendChild(copyBtn);
     }
 
+    // Citations (7.7): a document-grounded reply lists the chunks it drew
+    // from, collapsed by default so provenance is available without being
+    // loud. Persisted on the message, so it survives a reload.
+    if (msg.role === 'assistant' && Array.isArray(msg.citations) && msg.citations.length) {
+      const sources = document.createElement('details');
+      sources.className = 'msg-citations';
+      const summary = document.createElement('summary');
+      summary.textContent = `Sources (${msg.citations.length})`;
+      sources.appendChild(summary);
+      for (const c of msg.citations) {
+        const item = document.createElement('div');
+        item.className = 'msg-citation';
+        const head = document.createElement('div');
+        head.className = 'msg-citation-head';
+        head.textContent = c.docName + (Number.isInteger(c.chunk) ? ` · chunk ${c.chunk}` : '');
+        const snippet = document.createElement('blockquote');
+        snippet.textContent = c.snippet || '';
+        item.appendChild(head);
+        item.appendChild(snippet);
+        sources.appendChild(item);
+      }
+      body.appendChild(sources);
+    }
+
     // Regenerate is offered on the last assistant turn only: the history is
     // linear (no branching — see PLAN.md C1), so regenerating anything
     // earlier would silently discard every turn after it.
@@ -513,12 +642,49 @@
       actions.appendChild(regenBtn);
     }
 
+    // Reactions (7.2): 👍/👎 on any completed assistant reply. A second
+    // click on the active one clears it (reaction === value → null), and
+    // the choice persists with the message via db.js's normalizeMessage.
+    if (msg.role === 'assistant' && msg.content) {
+      const reactionBtn = (value, label) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'reaction-btn' + (msg.reaction === value ? ' active' : '');
+        btn.textContent = label;
+        btn.setAttribute('aria-pressed', String(msg.reaction === value));
+        btn.setAttribute('aria-label', `Rate this reply ${value === 'up' ? 'up' : 'down'}`);
+        btn.onclick = () => setMessageReaction(index, msg.reaction === value ? null : value);
+        return btn;
+      };
+      actions.appendChild(reactionBtn('up', '👍'));
+      actions.appendChild(reactionBtn('down', '👎'));
+    }
+
     if (msg.role === 'user') {
       const editBtn = document.createElement('button');
       editBtn.type = 'button';
       editBtn.textContent = 'Edit';
       editBtn.onclick = () => startEditingMessage(index, row);
       actions.appendChild(editBtn);
+    }
+
+    // Speak (F7): read an assistant reply aloud with the browser's TTS.
+    if (msg.role === 'assistant' && msg.content && 'speechSynthesis' in window) {
+      const speakBtn = document.createElement('button');
+      speakBtn.type = 'button';
+      speakBtn.textContent = 'Speak';
+      speakBtn.onclick = () => {
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.cancel();
+          speakBtn.textContent = 'Speak';
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(msg.content);
+        utterance.onend = () => (speakBtn.textContent = 'Speak');
+        speakBtn.textContent = 'Stop';
+        window.speechSynthesis.speak(utterance);
+      };
+      actions.appendChild(speakBtn);
     }
 
     if (actions.childElementCount) body.appendChild(actions);
@@ -550,6 +716,25 @@
     }
   }
 
+  // Reactions (7.2): set or clear the user's 👍/👎 on one assistant reply.
+  // A full messages replace is the only write path the API offers, and the
+  // reaction lives on the message, so that's what persistence uses — same
+  // trade-off regenerate/edit already accepted for linear history. The
+  // server's normalizeMessage drops anything but 'up'/'down'/absent.
+  async function setMessageReaction(index, value) {
+    const chat = activeSession;
+    if (!chat || !chat.messages[index]) return;
+    const updated = chat.messages.map((m, i) => {
+      if (i !== index) return m;
+      const next = { ...m };
+      if (value) next.reaction = value;
+      else delete next.reaction;
+      return next;
+    });
+    if (!(await replaceMessages(chat, updated))) return;
+    renderMessages();
+  }
+
   async function regenerateMessage(index) {
     if (abortController) return;
     const chat = activeSession;
@@ -564,7 +749,9 @@
     if (!(await replaceMessages(chat, chat.messages.slice(0, index)))) return;
     renderChatList();
     renderMessages();
-    await streamAssistantReply(chat, model);
+    // bypassCache: a regenerate's whole point is a fresh answer — replaying
+    // the cached text for the identical prompt would make the button a no-op.
+    await streamAssistantReply(chat, model, { bypassCache: true });
   }
 
   function startEditingMessage(index, row) {
@@ -632,7 +819,9 @@
     if (!(await replaceMessages(chat, kept))) return;
     renderChatList();
     renderMessages();
-    await streamAssistantReply(chat, model);
+    // bypassCache: same reasoning as regenerate — an edit changes the
+    // prompt, and the old cached reply for the un-edited history is stale.
+    await streamAssistantReply(chat, model, { bypassCache: true });
   }
 
   el.messages.addEventListener('click', (e) => {
@@ -686,6 +875,36 @@
     el.statusDot.className = 'status-dot ' + (ok ? 'ok' : 'bad');
     el.statusText.textContent = ok ? 'Ollama connected' : (message || 'Ollama unreachable');
   }
+
+  // ---------- Offline send queue (7.16 completion) ----------
+  // Sends that fail at the network level (server unreachable) are parked in
+  // localStorage and flushed here — on the browser's 'online' event and when
+  // the periodic health poll confirms the server is back. Deliberately NOT
+  // on every send completion: a still-down server would turn that into a
+  // hot retry loop. Queue helpers are pure (chat-helpers.js).
+  function updateOfflineQueueStatus() {
+    const n = offlineQueueCount(window.localStorage);
+    if (n > 0) setStatus(false, `${n} message${n === 1 ? '' : 's'} queued — will send when back online`);
+  }
+
+  async function flushOfflineQueue() {
+    if (navigator.onLine === false) return;
+    if (abortController) return;   // a send is already in flight
+    if (offlineQueueCount(window.localStorage) === 0) return;
+    const entry = shiftOfflineSend(window.localStorage);
+    if (!entry) return;
+    const target = chats.find((c) => c.id === entry.chatId);
+    if (!target) {                 // chat deleted while the message was queued
+      updateOfflineQueueStatus();
+      return flushOfflineQueue();
+    }
+    if (!activeSession || activeSession.id !== target.id) await selectChat(target.id);
+    el.promptInput.value = entry.text;
+    autoResizeTextarea();
+    el.composer.requestSubmit();
+  }
+
+  window.addEventListener('online', () => { flushOfflineQueue(); });
 
   // ---------- Current user ----------
   async function loadCurrentUser() {
@@ -776,7 +995,14 @@
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Failed to pull "${name}".`);
+        // Model-not-found (F12): Ollama answers 404 with "model ... not
+        // found" — offer the one-click pull instead of a dead end.
+        if (res.status === 404 && /not find|not found|model/i.test(data.error || '')) {
+          showErrorWithPull(data.error, model);
+        } else {
+          showError(data.error || `Request failed (${res.status})`);
+        }
+        throw new Error(data.error || `Request failed (${res.status})`);
       }
 
       const reader = res.body.getReader();
@@ -918,6 +1144,12 @@
           const dataUrl = await readAsDataURL(file);
           const content = String(dataUrl).slice(String(dataUrl).indexOf(',') + 1);
           pendingAttachments.push({ name: file.name, content, size: file.size, type: 'image' });
+        } else if (isPdfAttachment(file.name)) {
+          // PDFs: pdf.js (vendored) extracts the text client-side, so the
+          // attachment reaches the model as plain text exactly like a
+          // .txt file — the binary never leaves the machine either.
+          const content = await extractPdfText(file);
+          pendingAttachments.push({ name: file.name, content, size: file.size });
         } else {
           const content = await file.text();
           pendingAttachments.push({ name: file.name, content, size: file.size });
@@ -947,14 +1179,173 @@
     });
   }
 
+  // ---------- PDF text extraction ----------
+  // pdf.js is loaded as a classic script (public/vendor/pdf.min.js, the UMD
+  // build) and exposes window.pdfjsLib; the worker is the same-version file
+  // vendored next to it. Extraction runs entirely in the browser: the PDF's
+  // bytes are never uploaded anywhere, consistent with the app's
+  // local-only posture. If pdfjsLib is missing (vendor file deleted, or an
+  // offline load failure) the caller surfaces a plain error rather than
+  // silently attaching an empty string.
+  async function extractPdfText(file) {
+    if (!window.pdfjsLib) {
+      throw new Error('PDF support is unavailable — the vendored pdf.js library failed to load.');
+    }
+    const buffer = await file.arrayBuffer();
+    const doc = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+    try {
+      const pages = [];
+      for (let i = 1; i <= doc.numPages; i += 1) {
+        const page = await doc.getPage(i);
+        const textContent = await page.getTextContent();
+        // Reconstruct line breaks from pdf.js's positioned text items: an
+        // item that ends below the previous one's baseline starts a new
+        // line. Joining with '' would gluem WordsTogether on wrapped text.
+        let text = '';
+        let lastY = null;
+        for (const item of textContent.items) {
+          const y = item.transform && item.transform[5];
+          if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 1 && text && !text.endsWith('\n')) {
+            text += '\n';
+          }
+          text += item.str;
+          if (y !== undefined) lastY = y;
+        }
+        const trimmed = text.replace(/\n{3,}/g, '\n\n').trim();
+        pages.push(trimmed ? `--- Page ${i} of ${doc.numPages} ---\n${trimmed}` : `--- Page ${i} of ${doc.numPages} (no extractable text) ---`);
+      }
+      const joined = pages.join('\n\n').trim();
+      if (!joined || /^(-{3} Page \d+ of \d+ \(no extractable text\) -{3}\n?)+$/.test(joined)) {
+        throw new Error('no text layer found (scanned PDFs need OCR, which this app does not do)');
+      }
+      return joined;
+    } finally {
+      doc.destroy();
+    }
+  }
+
+  // ---------- Prompt shortcuts toolbar (Phase 7.3) ----------
+  // One-click prompt starters above the composer. A shortcut fills the
+  // composer (never auto-sends — the user keeps the final word), and any
+  // {{variable}} placeholders are prompted for first, same interaction as
+  // the prompt library (F17). variable extraction via templateVariables
+  // (chat-helpers.js), so it's test-pinned there.
+  const PROMPT_SHORTCUTS = [
+    { label: 'Summarize', text: 'Summarize the conversation so far in a few bullet points.' },
+    { label: 'Translate', text: 'Translate the following into {{language}}:\n' },
+    { label: 'Explain code', text: 'Explain what this code does, step by step:\n```\n\n```' },
+    { label: 'Brainstorm', text: 'Give me 10 ideas for {{topic}}, from conventional to unexpected.' },
+    { label: 'Proofread', text: 'Proofread the text below. Fix grammar and clarity, then list the changes you made:\n' },
+  ];
+
+  function renderShortcutBar() {
+    if (!el.shortcutBar) return;
+    el.shortcutBar.innerHTML = '';
+    for (const shortcut of PROMPT_SHORTCUTS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'shortcut-chip';
+      btn.textContent = shortcut.label;
+      btn.onclick = () => applyShortcut(shortcut.text);
+      el.shortcutBar.appendChild(btn);
+    }
+  }
+
+  function applyShortcut(template) {
+    let text = template;
+    for (const varName of templateVariables(template)) {
+      const value = prompt(`Value for "${varName}":`);
+      if (value === null) return; // cancelled — leave the composer alone
+      text = text.split(`{{${varName}}}`).join(value);
+    }
+    el.promptInput.value += (el.promptInput.value ? '\n' : '') + text;
+    el.promptInput.focus();
+    // Put the caret at the end so typing continues where the template left off.
+    el.promptInput.setSelectionRange(el.promptInput.value.length, el.promptInput.value.length);
+    autoResizeTextarea();
+  }
+
   // ---------- Sending messages ----------
   function autoResizeTextarea() {
     el.promptInput.style.height = 'auto';
     el.promptInput.style.height = Math.min(el.promptInput.scrollHeight, 200) + 'px';
   }
 
+  // ---------- Prompt history (↑/↓ recall) ----------
+  // Terminal-style recall of recently sent prompts. Stored locally per
+  // browser like settings/theme — prompts never leave the machine. The
+  // newest entry is first; duplicates are moved to the front; capped so a
+  // long session can't grow localStorage without bound.
+  const PROMPT_HISTORY_KEY = 'ollama-chat:prompt-history';
+  const PROMPT_HISTORY_MAX = 50;
+
+  let promptHistory = loadPromptHistory();
+  let historyIndex = -1; // position while cycling; -1 = not cycling
+  let historyDraft = ''; // what was in the box before ↑ was pressed
+
+  function loadPromptHistory() {    try {
+      const raw = localStorage.getItem(PROMPT_HISTORY_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((p) => typeof p === 'string' && p.trim()).slice(0, PROMPT_HISTORY_MAX) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function recordPromptHistory(text) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    promptHistory = [trimmed, ...promptHistory.filter((p) => p !== trimmed)].slice(0, PROMPT_HISTORY_MAX);
+    try {
+      localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(promptHistory));
+    } catch {
+      // Quota/private mode: recall just won't survive a reload this time.
+    }
+    historyIndex = -1;
+  }
+
+  // Returns the text to put in the box for a move of -1 (older) or +1
+  // (newer) through the history, or null when there is nowhere to go.
+  function historyMove(step, currentText) {
+    if (!promptHistory.length) return null;
+    if (historyIndex === -1) {
+      if (step > 0) return null;
+      historyDraft = currentText;
+      historyIndex = 0;
+      return promptHistory[0];
+    }
+    const next = historyIndex + step;
+    if (next >= promptHistory.length) return null;
+    if (next < 0) {
+      historyIndex = -1;
+      return historyDraft;
+    }
+    historyIndex = next;
+    return promptHistory[next];
+  }
+
   el.promptInput.addEventListener('input', autoResizeTextarea);
   el.promptInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && !e.shiftKey && !el.promptInput.value) {
+      const text = historyMove(-1, el.promptInput.value);
+      if (text !== null) {
+        e.preventDefault();
+        el.promptInput.value = text;
+        el.promptInput.setSelectionRange(text.length, text.length);
+        autoResizeTextarea();
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown' && !e.shiftKey && historyIndex !== -1) {
+      const text = historyMove(1, el.promptInput.value);
+      if (text !== null) {
+        e.preventDefault();
+        el.promptInput.value = text;
+        el.promptInput.setSelectionRange(text.length, text.length);
+        autoResizeTextarea();
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       el.composer.requestSubmit();
@@ -963,13 +1354,32 @@
 
   el.composer.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const text = el.promptInput.value.trim();
+    let text = el.promptInput.value.trim();
     if (!text) return;
 
-    const model = el.modelSelect.value;
+    // Slash commands (F13): handled inline, never sent to the model.
+    if (text.startsWith('/')) {
+      await runSlashCommand(text);
+      return;
+    }
+
+    recordPromptHistory(text);
+    let model = el.modelSelect.value;
     if (!model) {
       showError('Select a model first. If none are listed, pull one with "ollama pull <model>".');
       return;
+    }
+
+    // Auto model routing (7.11): when enabled, the rules-based suggester
+    // picks which installed model answers this prompt; the picker's model
+    // is only the fallback. The suggested switch is shown, never silent.
+    if (settings.autoRoute === true && models.length) {
+      const suggested = suggestModel({ models, text, currentModel: model });
+      if (suggested && suggested !== model && models.some((m) => m.name === suggested)) {
+        model = suggested;
+        el.modelSelect.value = suggested;
+        setStatus(true, `Routed to ${suggested}`);
+      }
     }
 
     let chat = activeSession;
@@ -1009,8 +1419,88 @@
     await streamAssistantReply(chat, model);
   });
 
-  async function streamAssistantReply(chat, model) {
+  // ---------- Slash commands (F13) ----------
+  async function runSlashCommand(raw) {
+    const [cmd] = raw.split(/\s+/);
+    const arg = raw.slice(cmd.length).trim();
+    el.promptInput.value = '';
+    autoResizeTextarea();
+    switch (cmd) {
+      case '/help':
+        alert('Commands:\n/new — start a new chat\n/clear — clear this chat\n/model <name> — switch model\n/system <prompt> — set the system prompt\n/help — this list\n\nTip: Ctrl/Cmd+K opens the command palette.');
+        break;
+      case '/new':
+        await createChat();
+        break;
+      case '/clear':
+        el.clearChatBtn.click();
+        break;
+      case '/model':
+        if (!arg) {
+          showError('Usage: /model <name>. Installed: ' + (models.map((m) => m.name).join(', ') || 'none'));
+          return;
+        }
+        if (!models.some((m) => m.name === arg)) {
+          showError(`"${arg}" is not installed. Try /model with one of: ${models.map((m) => m.name).join(', ') || 'none'}`);
+          return;
+        }
+        el.modelSelect.value = arg;
+        settings.lastModel = arg;
+        saveSettings();
+        break;
+      case '/system':
+        if (!arg) {
+          showError('Usage: /system <prompt>');
+          return;
+        }
+        settings.systemPrompt = arg;
+        saveSettings();
+        el.systemPrompt.value = arg;
+        break;
+      default:
+        showError(`Unknown command "${cmd}". Try /help.`);
+    }
+  }
+
+  // ---------- Response cache (Phase 7.13) ----------
+  // In-memory, per browsing session: identical requests (same model, same
+  // conversation prefix as the model sees it, same sampling options, same
+  // server) replay the stored reply instead of re-running the model. Never
+  // persisted, capped, and bypassed by regenerate/edit — a regenerate that
+  // returned the cached text would be useless. Counters feed the stats
+  // modal; reset on reload like the cache itself.
+  const RESPONSE_CACHE_MAX = 50;
+  const responseCache = new Map(); // cacheKey -> assistant text
+  const cacheCounters = { hits: 0, misses: 0 };
+
+  function cacheGet(key) {
+    if (!responseCache.has(key)) {
+      cacheCounters.misses += 1;
+      return null;
+    }
+    cacheCounters.hits += 1;
+    // Re-insert so the freshest key is evicted last (LRU via delete+set).
+    const text = responseCache.get(key);
+    responseCache.delete(key);
+    responseCache.set(key, text);
+    return text;
+  }
+
+  function cachePut(key, text) {
+    if (!text || !text.trim()) return;
+    responseCache.set(key, text);
+    if (responseCache.size > RESPONSE_CACHE_MAX) {
+      responseCache.delete(responseCache.keys().next().value);
+    }
+  }
+
+  async function streamAssistantReply(chat, model, { bypassCache = false } = {}) {
     const ollamaMessages = buildOllamaMessages(settings.systemPrompt, chat.messages);
+    const requestOptions = {
+      temperature: settings.temperature,
+      top_p: settings.topP,
+      num_ctx: settings.numCtx,
+    };
 
     const assistantMsg = { role: 'assistant', content: '', model };
     chat.messages.push(assistantMsg);
@@ -1020,6 +1510,36 @@
 
     abortController = new AbortController();
 
+    // Cache lookup (7.13): only for plain sends with the setting on. A hit
+    // replays the stored reply without touching Ollama — no stream to
+    // abort, so the request short-circuits straight to persistence.
+    const cacheKey = bypassCache || settings.responseCache !== true
+      ? null
+      : cacheKeyFor({
+          model,
+          messages: ollamaMessages,
+          options: requestOptions,
+          serverId: settings.serverId || 0,
+        });
+    if (cacheKey) {
+      const cached = cacheGet(cacheKey);
+      if (cached !== null) {
+        assistantMsg.content = cached;
+        assistantMsg.cached = true;
+        pendingRenderText = null;
+        // A full re-render, not just a content swap: renderMessages() ran
+        // earlier with empty content and no `cached` flag, so only rebuilding
+        // the rows makes the "· cached" role badge show up too.
+        renderMessages();
+        await persistAssistantMessage(chat, assistantMsg);
+        setSending(false);
+        markLastRowStreaming(false);
+        abortController = null;
+        renderChatList();
+        return;
+      }
+    }
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -1028,17 +1548,22 @@
         body: JSON.stringify({
           model,
           messages: ollamaMessages,
-          options: {
-            temperature: settings.temperature,
-            top_p: settings.topP,
-            num_ctx: settings.numCtx,
-          },
-          useMemory: settings.useMemory === true,
+          options: requestOptions,
+          useMemory: settings.useMemory === true || settings.useDocuments === true,
+          useDocuments: settings.useDocuments === true,
+          serverId: settings.serverId || 0,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        // Model-not-found (F12): Ollama answers 404 with "model ... not
+        // found" — offer the one-click pull instead of a dead end.
+        if (res.status === 404 && /not find|not found|model/i.test(data.error || '')) {
+          showErrorWithPull(data.error, model);
+        } else {
+          showError(data.error || `Request failed (${res.status})`);
+        }
         throw new Error(data.error || `Request failed (${res.status})`);
       }
 
@@ -1047,6 +1572,22 @@
       if (res.headers.get('X-Compacted') === 'true') {
         compactedChats.add(chat.id);
         updateContextMeter();
+      }
+
+      // Citations (7.7): a document-grounded reply carries base64 JSON in
+      // X-Citations. Attaching it to the message is what makes it persist —
+      // db.js's normalizeMessage keeps a well-formed citations array.
+      const citationsHeader = res.headers.get('X-Citations');
+      if (citationsHeader) {
+        try {
+          // base64 → bytes → UTF-8. atob alone would latin-1-decode and
+          // mangle non-ASCII snippets; there's no Buffer in the browser.
+          const bytes = Uint8Array.from(atob(citationsHeader), (ch) => ch.charCodeAt(0));
+          const parsed = JSON.parse(new TextDecoder().decode(bytes));
+          if (Array.isArray(parsed) && parsed.length) assistantMsg.citations = parsed;
+        } catch {
+          // Malformed header — provenance is best-effort; drop it silently.
+        }
       }
 
       const reader = res.body.getReader();
@@ -1081,6 +1622,7 @@
 
       // The throttled renderer may still be holding the last chunk or two.
       flushLastMessageContent();
+      if (cacheKey) cachePut(cacheKey, assistantMsg.content);
       await persistAssistantMessage(chat, assistantMsg);
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -1088,6 +1630,27 @@
         pendingRenderText = null;
         updateLastMessageContent(assistantMsg.content);
         await persistAssistantMessage(chat, assistantMsg);
+      } else if (err.name === 'TypeError' && !bypassCache && !assistantMsg.content) {
+        // Network-level failure (the request never got a response — server
+        // unreachable): park the outgoing message in the offline queue
+        // (7.16 completion) instead of just erroring. It flushes on the
+        // 'online' event or the next successful health poll. Never queued:
+        // regenerate/edit (bypassCache) and messages with attachments or
+        // images (they may not survive a reload).
+        pendingRenderText = null;
+        const failedUserMsg = chat.messages[chat.messages.length - 1];
+        const queueable = failedUserMsg && failedUserMsg.role === 'user'
+          && typeof failedUserMsg.content === 'string' && failedUserMsg.content.trim().length > 0
+          && !failedUserMsg.attachments && !failedUserMsg.images;
+        chat.messages.pop();
+        renderMessages();
+        if (queueable) {
+          enqueueOfflineSend(window.localStorage, { chatId: chat.id, text: failedUserMsg.content });
+          updateOfflineQueueStatus();
+          showError('Offline — message queued. It will send automatically when the connection returns.');
+        } else {
+          showError(err.message);
+        }
       } else {
         showError(err.message);
         pendingRenderText = null;
@@ -1189,6 +1752,35 @@
     text.textContent = message;
     banner.appendChild(icon);
     banner.appendChild(text);
+    el.messages.appendChild(banner);
+    scrollToBottom();
+  }
+
+  // Error banner with a one-click pull action (F12): shown when a chat or
+  // regenerate targets a model that isn't installed on the host.
+  function showErrorWithPull(message, modelName) {
+    const banner = document.createElement('div');
+    banner.className = 'error-banner';
+    banner.setAttribute('role', 'alert');
+    const icon = document.createElement('span');
+    icon.className = 'error-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = ICONS.warning;
+    const text = document.createElement('span');
+    text.textContent = message;
+    const pull = document.createElement('button');
+    pull.type = 'button';
+    pull.className = 'btn btn-primary';
+    pull.textContent = `Pull ${modelName}`;
+    pull.onclick = () => {
+      banner.remove();
+      el.pullModelInput.value = modelName;
+      openSettings();
+      pullModel();
+    };
+    banner.appendChild(icon);
+    banner.appendChild(text);
+    banner.appendChild(pull);
     el.messages.appendChild(banner);
     scrollToBottom();
   }
@@ -1352,7 +1944,7 @@
 
   // ---------- Settings modal ----------
   function openSettings() {
-    el.ollamaHostDisplay.value = 'Configured via server (default http://127.0.0.1:11434)';
+    el.serverSelect.value = String(settings.serverId || 0);
     el.systemPrompt.value = settings.systemPrompt || '';
     el.temperature.value = settings.temperature;
     el.tempValue.textContent = settings.temperature;
@@ -1360,16 +1952,29 @@
     el.topPValue.textContent = settings.topP;
     el.numCtx.value = settings.numCtx;
     el.useMemory.checked = settings.useMemory === true;
+    el.useDocuments.checked = settings.useDocuments === true;
+    el.autoRoute.checked = settings.autoRoute === true;
+    el.responseCache.checked = settings.responseCache !== false;
+    renderPresets();
+    renderPins();
+    renderTemplates();
+    renderAudit();
+    renderTokens();
+    renderWebhooks();
     el.settingsOverlay.classList.remove('hidden');
     el.closeSettingsBtn.focus();
   }
 
   function closeSettings() {
+    settings.serverId = Number(el.serverSelect.value) || 0;
     settings.systemPrompt = el.systemPrompt.value;
     settings.temperature = Number(el.temperature.value);
     settings.topP = Number(el.topP.value);
     settings.numCtx = Number(el.numCtx.value) || 4096;
     settings.useMemory = el.useMemory.checked;
+    settings.useDocuments = el.useDocuments.checked;
+    settings.autoRoute = el.autoRoute.checked;
+    settings.responseCache = el.responseCache.checked;
     saveSettings();
     // numCtx is the meter's denominator, so it can change here.
     updateContextMeter();
@@ -1401,7 +2006,1235 @@
   });
   el.temperature.addEventListener('input', () => (el.tempValue.textContent = el.temperature.value));
   el.topP.addEventListener('input', () => (el.topPValue.textContent = el.topP.value));
-  // ---------- Download my data (Settings modal) ----------
+
+  // ---------- Multi-server picker (F16) ----------
+  async function loadServers() {
+    try {
+      const data = await apiRequest('/api/servers');
+      const servers = data.servers || [];
+      el.serverSelect.innerHTML = '';
+      for (const s of servers) {
+        const opt = document.createElement('option');
+        opt.value = String(s.id);
+        opt.textContent = s.url;
+        el.serverSelect.appendChild(opt);
+      }
+      // A settings.serverId beyond the current list (hosts were removed)
+      // falls back to the primary rather than leaving a broken selection.
+      if (!servers.some((s) => String(s.id) === String(settings.serverId || 0))) {
+        settings.serverId = 0;
+      }
+      el.serverSelect.value = String(settings.serverId || 0);
+    } catch (err) {
+      showError(`Couldn't load the server list: ${err.message}`);
+    }
+  }
+
+  // ---------- System prompt presets (F6) ----------
+  const PRESETS_KEY = 'ollama-chat:presets';
+  let presets = [];
+
+  function loadPresets() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(PRESETS_KEY));
+      presets = Array.isArray(parsed) ? parsed.filter((p) => p && typeof p.name === 'string') : [];
+    } catch {
+      presets = [];
+    }
+  }
+
+  function savePresets() {
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+  }
+
+  function renderPresets() {
+    el.presetSelect.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '— custom —';
+    el.presetSelect.appendChild(none);
+    for (const p of presets) {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      opt.textContent = p.name;
+      el.presetSelect.appendChild(opt);
+    }
+    el.presetSelect.value = '';
+  }
+
+  el.presetSelect?.addEventListener('change', () => {
+    const preset = presets.find((p) => p.name === el.presetSelect.value);
+    if (!preset) return;
+    el.systemPrompt.value = preset.systemPrompt || '';
+    el.temperature.value = preset.temperature;
+    el.tempValue.textContent = preset.temperature;
+    el.topP.value = preset.topP;
+    el.topPValue.textContent = preset.topP;
+  });
+
+  el.presetSaveBtn?.addEventListener('click', () => {
+    const name = prompt('Preset name:');
+    if (!name || !name.trim()) return;
+    const preset = {
+      name: name.trim().slice(0, 60),
+      systemPrompt: el.systemPrompt.value,
+      temperature: Number(el.temperature.value),
+      topP: Number(el.topP.value),
+    };
+    presets = presets.filter((p) => p.name !== preset.name);
+    presets.push(preset);
+    savePresets();
+    renderPresets();
+    el.presetSelect.value = preset.name;
+  });
+
+  el.presetDeleteBtn?.addEventListener('click', () => {
+    const name = el.presetSelect.value;
+    if (!name) return;
+    presets = presets.filter((p) => p.name !== name);
+    savePresets();
+    renderPresets();
+  });
+
+  // ---------- Pinned facts (F14) ----------
+  async function renderPins() {
+    el.pinsList.innerHTML = '';
+    let pins;
+    try {
+      const data = await apiRequest('/api/pins');
+      pins = data.pins || [];
+    } catch (err) {      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = `Pins unavailable: ${err.message}`;
+      el.pinsList.appendChild(note);
+      return;
+    }
+    if (!pins.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No pinned facts yet.';
+      el.pinsList.appendChild(empty);
+      return;
+    }
+    for (const pin of pins) {
+      const item = document.createElement('div');
+      item.className = 'model-manage-item';
+      const text = document.createElement('span');
+      text.className = 'name';
+      text.textContent = pin.text;
+      const del = document.createElement('button');
+      del.className = 'del-model';
+      del.type = 'button';
+      del.textContent = 'Delete';
+      del.onclick = async () => {
+        try {
+          await apiRequest(`/api/pins/${encodeURIComponent(pin.id)}`, { method: 'DELETE' });
+          await renderPins();
+        } catch (err) {
+          showError(err.message);
+        }
+      };
+      item.appendChild(text);
+      item.appendChild(del);
+      el.pinsList.appendChild(item);
+    }
+  }
+
+  el.pinAddBtn?.addEventListener('click', async () => {
+    const text = el.pinInput.value.trim();
+    if (!text) return;
+    try {
+      await apiRequest('/api/pins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      el.pinInput.value = '';
+      await renderPins();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  // ---------- Prompt library (F17) ----------
+  const TEMPLATES_KEY = 'ollama-chat:templates';
+  let templates = [];
+
+  function loadTemplates() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(TEMPLATES_KEY));
+      templates = Array.isArray(parsed) ? parsed.filter((t) => t && typeof t.name === 'string' && typeof t.text === 'string') : [];
+    } catch {
+      templates = [];
+    }
+  }
+
+  function saveTemplates() {
+    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+  }
+
+  function renderTemplates() {
+    el.templatesList.innerHTML = '';
+    if (!templates.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No templates yet — {{variables}} are filled in when used.';
+      el.templatesList.appendChild(empty);
+      return;
+    }
+    for (const t of templates) {
+      const item = document.createElement('div');
+      item.className = 'model-manage-item';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = t.name;
+      const use = document.createElement('button');
+      use.className = 'del-model';
+      use.type = 'button';
+      use.textContent = 'Use';
+      use.onclick = () => {
+        let text = t.text;
+        const vars = [...new Set((t.text.match(/{{\s*([\w.-]+)\s*}}/g) || []))];
+        for (const v of vars) {
+          const val = prompt(`Value for "${v.replace(/[{}]/g, '').trim()}":`);
+          if (val === null) return;
+          text = text.split(v).join(val);
+        }
+        el.promptInput.value += (el.promptInput.value ? '\n' : '') + text;
+        el.promptInput.focus();
+        autoResizeTextarea();
+      };
+      const del = document.createElement('button');
+      del.className = 'del-model';
+      del.type = 'button';
+      del.textContent = 'Delete';
+      del.onclick = () => {
+        templates = templates.filter((x) => x !== t);
+        saveTemplates();
+        renderTemplates();
+      };
+      item.appendChild(name);
+      item.appendChild(use);
+      item.appendChild(del);
+      el.templatesList.appendChild(item);
+    }
+  }
+
+  el.templateAddBtn?.addEventListener('click', () => {
+    const name = el.templateName.value.trim();
+    const text = el.templateText.value.trim();
+    if (!name || !text) {
+      showError('A template needs both a name and text.');
+      return;
+    }
+    templates = templates.filter((t) => t.name !== name);
+    templates.push({ name, text });
+    saveTemplates();
+    el.templateName.value = '';
+    el.templateText.value = '';
+    renderTemplates();
+  });
+
+  // ---------- Memory editing (Phase 7.8) ----------
+  // Explicitly loaded (Qdrant scroll isn't free and most sessions never
+  // touch this), paginated by the server's next_page_offset, and edited
+  // inline: Edit swaps the text for a textarea, Save PATCHes (server
+  // re-embeds), Delete removes the point after a confirm.
+  let memoryNextOffset = null;
+
+  async function loadMemoryPoints() {
+    el.memoryList.innerHTML = '<div class="muted">Loading…</div>';
+    el.memoryPageInfo.textContent = '';
+    try {
+      const query = memoryNextOffset ? `?offset=${encodeURIComponent(memoryNextOffset)}` : '';
+      const data = await apiRequest(`/api/memory/points${query}`);
+      renderMemoryPoints(data.points || []);
+      memoryNextOffset = data.nextOffset || null;
+      el.memoryPageInfo.textContent = memoryNextOffset ? 'More available — click again for the next page.' : '';
+    } catch (err) {
+      el.memoryList.innerHTML = '';
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = `Memory unavailable: ${err.message}`;
+      el.memoryList.appendChild(note);
+    }
+  }
+
+  function renderMemoryPoints(points) {
+    el.memoryList.innerHTML = '';
+    if (!points.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = memoryNextOffset ? '' : 'Nothing indexed yet — chat with "Semantic memory" enabled to build it.';
+      el.memoryList.appendChild(empty);
+      return;
+    }
+    for (const point of points) {
+      const item = document.createElement('div');
+      item.className = 'model-manage-item memory-item';
+
+      const textEl = document.createElement('span');
+      textEl.className = 'name';
+      const full = typeof point.payload?.text === 'string' ? point.payload.text : '';
+      textEl.textContent = full.length > 160 ? `${full.slice(0, 160)}…` : full;
+      textEl.title = full;
+      item.appendChild(textEl);
+
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'del-model';
+      edit.textContent = 'Edit';
+      edit.onclick = () => startMemoryEdit(item, point, full);
+      item.appendChild(edit);
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'del-model';
+      del.textContent = 'Delete';
+      del.onclick = async () => {
+        if (!confirm('Delete this memory point? It cannot be recovered.')) return;
+        try {
+          await apiRequest(`/api/memory/points/${encodeURIComponent(point.id)}`, { method: 'DELETE' });
+          item.remove();
+        } catch (err) {
+          showError(err.message);
+        }
+      };
+      item.appendChild(del);
+      el.memoryList.appendChild(item);
+    }
+  }
+
+  function startMemoryEdit(item, point, currentText) {
+    if (item.querySelector('.memory-edit')) return;
+    item.querySelectorAll('button').forEach((b) => (b.disabled = true));
+
+    const editor = document.createElement('div');
+    editor.className = 'memory-edit';
+    const textarea = document.createElement('textarea');
+    textarea.rows = 4;
+    textarea.value = currentText;
+    const actions = document.createElement('div');
+    actions.className = 'msg-edit-actions';
+
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'btn btn-primary';
+    save.textContent = 'Save';
+    save.onclick = async () => {
+      const text = textarea.value.trim();
+      if (!text) { showError('Memory text cannot be empty.'); return; }
+      save.disabled = true;
+      try {
+        await apiRequest(`/api/memory/points/${encodeURIComponent(point.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        await loadMemoryPoints();
+      } catch (err) {
+        save.disabled = false;
+        showError(err.message);
+      }
+    };
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn btn-ghost';
+    cancel.textContent = 'Cancel';
+    cancel.onclick = () => loadMemoryPoints();
+
+    actions.appendChild(save);
+    actions.appendChild(cancel);
+    editor.appendChild(textarea);
+    editor.appendChild(actions);
+    item.appendChild(editor);
+    textarea.focus();
+  }
+
+  el.memoryLoadBtn?.addEventListener('click', () => {
+    memoryNextOffset = null;
+    loadMemoryPoints();
+  });
+
+  // ---------- URL summarizer (Phase 7.9) ----------
+  el.summarizeUrlBtn?.addEventListener('click', async () => {
+    const url = el.summarizeUrl.value.trim();
+    const model = el.modelSelect.value;
+    if (!url) { showError('Enter a URL to summarize.'); return; }
+    if (!model) { showError('Select a model first — the summary needs one.'); return; }
+    el.summarizeUrlBtn.disabled = true;
+    el.summarizeUrlResult.innerHTML = '<div class="muted">Fetching and summarizing…</div>';
+    try {
+      const data = await apiRequest('/api/summarize-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, model }),
+      });
+      el.summarizeUrlResult.innerHTML = '';
+      const head = document.createElement('div');
+      head.className = 'muted';
+      head.textContent = `${data.chars} characters of text summarized from ${data.url}`;
+      const body = document.createElement('div');
+      body.className = 'msg-content';
+      body.innerHTML = renderMarkdown(data.summary || '_(empty summary)_');
+      const use = document.createElement('button');
+      use.type = 'button';
+      use.className = 'btn btn-ghost';
+      use.textContent = 'Use as prompt';
+      use.onclick = () => {
+        el.promptInput.value += (el.promptInput.value ? '\n' : '') + data.summary;
+        autoResizeTextarea();
+        closeSettings();
+        el.promptInput.focus();
+      };
+      el.summarizeUrlResult.appendChild(head);
+      el.summarizeUrlResult.appendChild(body);
+      el.summarizeUrlResult.appendChild(use);
+    } catch (err) {
+      el.summarizeUrlResult.innerHTML = '';
+      showError(err.message);
+    } finally {
+      el.summarizeUrlBtn.disabled = false;
+    }
+  });
+
+  // ---------- Document library (F3) ----------
+  let docFile = null;
+  el.docPickBtn?.addEventListener('click', () => el.docFileInput.click());
+  el.docFileInput?.addEventListener('change', () => {
+    docFile = el.docFileInput.files[0] || null;
+    el.docFileName.textContent = docFile ? docFile.name : '';
+    el.docIndexBtn.disabled = !docFile;
+  });
+  el.docIndexBtn?.addEventListener('click', async () => {
+    if (!docFile) return;
+    el.docIndexBtn.disabled = true;
+    try {
+      const text = await docFile.text();
+      const data = await apiRequest('/api/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: docFile.name, text }),
+      });
+      el.docFileName.textContent = `Indexed ${data.chunks} chunks from ${data.name}`;
+      docFile = null;
+      el.docFileInput.value = '';
+      el.docIndexBtn.disabled = true;
+      await renderAudit();
+    } catch (err) {
+      showError(err.message);
+      el.docIndexBtn.disabled = false;
+    }
+  });
+
+  // ---------- Audit log viewer (F20) ----------
+  async function renderAudit() {
+    if (!el.auditList) return;
+    el.auditList.innerHTML = '';
+    let entries;
+    try {
+      const data = await apiRequest('/api/audit');
+      entries = data.entries || [];
+    } catch (err) {
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = `Audit log unavailable: ${err.message}`;
+      el.auditList.appendChild(note);
+      return;
+    }
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No sensitive actions recorded yet.';
+      el.auditList.appendChild(empty);
+      return;
+    }
+    for (const entry of entries.slice(0, 50)) {
+      const item = document.createElement('div');
+      item.className = 'audit-item';
+      const when = new Date(entry.at).toLocaleString();
+      item.textContent = `${when} — ${entry.action}${entry.detail ? `: ${entry.detail}` : ''}`;
+      el.auditList.appendChild(item);
+    }
+  }
+
+  // ---------- API tokens (7.14) ----------
+  // Create/list/revoke personal API keys. The secret is displayed once, in
+  // a highlighted box, and never fetched again — the list endpoint only
+  // ever returns the prefix, so a leaked page state can't leak a key.
+  async function renderTokens() {
+    if (!el.tokenList) return;
+    el.tokenList.innerHTML = '';
+    let tokens;
+    try {
+      const data = await apiRequest('/api/tokens');
+      tokens = data.tokens || [];
+    } catch (err) {
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = `API tokens unavailable: ${err.message}`;
+      el.tokenList.appendChild(note);
+      return;
+    }
+    if (!tokens.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No API tokens yet.';
+      el.tokenList.appendChild(empty);
+      return;
+    }
+    for (const token of tokens) {
+      const item = document.createElement('div');
+      item.className = 'model-manage-item';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = `${token.name} · ${token.prefix}…`;
+      name.title = `Created ${new Date(token.createdAt).toLocaleString()}` +
+        (token.lastUsedAt ? ` · last used ${new Date(token.lastUsedAt).toLocaleString()}` : ' · never used');
+      const del = document.createElement('button');
+      del.className = 'del-model';
+      del.type = 'button';
+      del.textContent = 'Revoke';
+      del.onclick = async () => {
+        if (!confirm(`Revoke token "${token.name}"? Scripts using it will stop working immediately.`)) return;
+        try {
+          await apiRequest(`/api/tokens/${encodeURIComponent(token.id)}`, { method: 'DELETE' });
+          await renderTokens();
+          await renderAudit();
+        } catch (err) {
+          showError(err.message);
+        }
+      };
+      item.appendChild(name);
+      item.appendChild(del);
+      el.tokenList.appendChild(item);
+    }
+  }
+
+  el.tokenCreateBtn?.addEventListener('click', async () => {
+    const name = el.tokenNameInput.value.trim();
+    if (!name) {
+      showError('Give the token a name first.');
+      return;
+    }
+    el.tokenCreateBtn.disabled = true;
+    try {
+      const token = await apiRequest('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      el.tokenNameInput.value = '';
+      // One-time secret display. Selectable text, not a prompt() — it may
+      // need copying from a machine without clipboard permission.
+      el.tokenSecretBox.classList.remove('hidden');
+      el.tokenSecretBox.innerHTML = '';
+      const label = document.createElement('div');
+      label.className = 'muted';
+      label.textContent = 'Copy this token now — it is shown only once:';
+      const code = document.createElement('code');
+      code.className = 'token-secret';
+      code.textContent = token.token;
+      el.tokenSecretBox.appendChild(label);
+      el.tokenSecretBox.appendChild(code);
+      await renderTokens();
+      await renderAudit();
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      el.tokenCreateBtn.disabled = false;
+    }
+  });
+
+  // ---------- Webhooks (7.15) ----------
+  async function renderWebhooks() {
+    if (!el.webhookList) return;
+    el.webhookList.innerHTML = '';
+    let webhooks;
+    try {
+      const data = await apiRequest('/api/webhooks');
+      webhooks = data.webhooks || [];
+    } catch (err) {
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = `Webhooks unavailable: ${err.message}`;
+      el.webhookList.appendChild(note);
+      return;
+    }
+    if (!webhooks.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No webhooks yet.';
+      el.webhookList.appendChild(empty);
+      return;
+    }
+    for (const hook of webhooks) {
+      const item = document.createElement('div');
+      item.className = 'model-manage-item';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = `${hook.name} — ${hook.events.join(', ')}`;
+      name.title = hook.url;
+
+      const test = document.createElement('button');
+      test.className = 'del-model';
+      test.type = 'button';
+      test.textContent = 'Test';
+      test.onclick = async () => {
+        test.disabled = true;
+        try {
+          const outcome = await apiRequest(`/api/webhooks/${encodeURIComponent(hook.id)}/test`, { method: 'POST' });
+          test.textContent = outcome.ok ? 'Delivered ✓' : `Failed (${outcome.error || outcome.status})`;
+        } catch (err) {
+          test.textContent = 'Failed';
+          showError(err.message);
+        } finally {
+          setTimeout(() => { test.textContent = 'Test'; test.disabled = false; }, 2500);
+        }
+      };
+
+      const del = document.createElement('button');
+      del.className = 'del-model';
+      del.type = 'button';
+      del.textContent = 'Delete';
+      del.onclick = async () => {
+        try {
+          await apiRequest(`/api/webhooks/${encodeURIComponent(hook.id)}`, { method: 'DELETE' });
+          await renderWebhooks();
+          await renderAudit();
+        } catch (err) {
+          showError(err.message);
+        }
+      };
+
+      item.appendChild(name);
+      item.appendChild(test);
+      item.appendChild(del);
+      el.webhookList.appendChild(item);
+    }
+  }
+
+  el.webhookAddBtn?.addEventListener('click', async () => {
+    const name = el.webhookNameInput.value.trim();
+    const url = el.webhookUrlInput.value.trim();
+    const events = [
+      ...(el.webhookEventPull.checked ? ['model.pull'] : []),
+      ...(el.webhookEventSession.checked ? ['session.create'] : []),
+    ];
+    el.webhookAddBtn.disabled = true;
+    try {
+      await apiRequest('/api/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url, events }),
+      });
+      el.webhookNameInput.value = '';
+      el.webhookUrlInput.value = '';
+      await renderWebhooks();
+      await renderAudit();
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      el.webhookAddBtn.disabled = false;
+    }
+  });
+
+  // ---------- Share link (F10) ----------
+  el.shareBtn?.addEventListener('click', async () => {
+    const chat = activeSession;
+    if (!chat || !chat.messages.length) {
+      showError('Nothing to share yet — this chat has no messages.');
+      return;
+    }
+    try {
+      const data = await apiRequest(`/api/sessions/${encodeURIComponent(chat.id)}/share`, { method: 'POST' });
+      const url = `${location.origin}${data.url}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        alert(`Share link copied to clipboard:\n${url}\n\nSharing again revokes this link.`);
+      } catch {
+        prompt('Share link (copy manually):', url);
+      }
+      await renderAudit();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+  // ---------- Voice dictation (F7) ----------
+  // Web Speech API where the browser offers it; hidden otherwise. Results
+  // append to whatever is already in the composer so dictation and typing
+  // mix freely.
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+
+  if (SpeechRecognition && el.micBtn) {
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    let listening = false;
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        if (event.results[i].isFinal) {
+          el.promptInput.value += (el.promptInput.value ? ' ' : '') + event.results[i][0].transcript;
+          autoResizeTextarea();
+        }
+      }
+    };
+    recognition.onend = () => {
+      listening = false;
+      el.micBtn.classList.remove('recording');
+    };
+    recognition.onerror = () => {
+      listening = false;
+      el.micBtn.classList.remove('recording');
+    };
+    el.micBtn.addEventListener('click', () => {
+      if (listening) {
+        recognition.stop();
+        return;
+      }
+      listening = true;
+      el.micBtn.classList.add('recording');
+      recognition.start();
+    });
+  } else if (el.micBtn) {
+    el.micBtn.classList.add('hidden');
+  }
+
+  // ---------- Command palette (F13) ----------
+  function paletteCommands() {
+    const modelCmds = models.map((m) => ({
+      label: `Model: ${m.name}`,
+      run: () => {
+        el.modelSelect.value = m.name;
+        settings.lastModel = m.name;
+        saveSettings();
+      },
+    }));
+    return [
+      { label: 'New chat', run: () => createChat() },
+      { label: 'Toggle theme', run: toggleTheme },
+      { label: 'Open settings', run: openSettings },
+      { label: 'Export chat as Markdown', run: () => exportActiveChat('markdown') },
+      { label: 'Export chat as JSON', run: () => exportActiveChat('json') },
+      { label: 'Share this chat', run: () => el.shareBtn.click() },
+      { label: 'Compare models', run: () => openCompare() },
+      { label: 'Chat statistics', run: () => openStats() },
+      ...modelCmds,
+    ];
+  }
+
+  function renderPalette(filter) {
+    el.paletteList.innerHTML = '';
+    const q = filter.trim().toLowerCase();
+    const matches = paletteCommands().filter((c) => !q || c.label.toLowerCase().includes(q));
+    for (const cmd of matches.slice(0, 12)) {
+      const item = document.createElement('div');
+      item.className = 'palette-item';
+      item.setAttribute('role', 'option');
+      item.textContent = cmd.label;
+      item.onclick = () => {
+        setPaletteOpen(false);
+        cmd.run();
+      };
+      el.paletteList.appendChild(item);
+    }
+  }
+
+  function setPaletteOpen(open) {
+    el.paletteOverlay.classList.toggle('hidden', !open);
+    if (open) {
+      el.paletteInput.value = '';
+      renderPalette('');
+      el.paletteInput.focus();
+    }
+  }
+
+  el.paletteInput?.addEventListener('input', () => renderPalette(el.paletteInput.value));
+  el.paletteOverlay?.addEventListener('click', (e) => {
+    if (e.target === el.paletteOverlay) setPaletteOpen(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      setPaletteOpen(!el.paletteOverlay.classList.contains('hidden') ? false : true);
+    }
+    if (e.key === 'Escape' && !el.paletteOverlay.classList.contains('hidden')) {
+      setPaletteOpen(false);
+    }
+  });
+
+  // ---------- Chat statistics (F9) ----------
+  function openStats() {
+    const chat = activeSession;
+    el.statsBody.innerHTML = '';
+    if (!chat || !chat.messages.length) {
+      el.statsBody.innerHTML = '<div class="muted">No messages yet.</div>';
+    } else {
+      const byModel = new Map();
+      let userCount = 0;
+      let assistantCount = 0;
+      for (const m of chat.messages) {
+        if (m.role === 'user') userCount += 1;
+        if (m.role === 'assistant') {
+          assistantCount += 1;
+          const key = m.model || 'unknown';
+          byModel.set(key, (byModel.get(key) || 0) + 1);
+        }
+      }
+      const tokens = estimateChatTokens(settings.systemPrompt, chat.messages);
+      const rows = [
+        ['Messages', `${chat.messages.length} (${userCount} you, ${assistantCount} assistant)`],
+        ['Estimated tokens (whole chat)', `~${formatTokens(tokens)}`],
+        ['Context window', `${formatTokens(settings.numCtx || 4096)} tokens`],
+        ['Models used', [...byModel].map(([m, c]) => `${m} (${c})`).join(', ') || '—'],
+        ['Response cache (this session)', `${cacheCounters.hits} hit${cacheCounters.hits === 1 ? '' : 's'} / ${cacheCounters.misses} miss${cacheCounters.misses === 1 ? '' : 'es'} · ${responseCache.size} stored`],
+      ];
+      for (const [label, value] of rows) {
+        const row = document.createElement('div');
+        row.className = 'stats-row';
+        const l = document.createElement('span');
+        l.className = 'stats-label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.textContent = value;
+        row.appendChild(l);
+        row.appendChild(v);
+        el.statsBody.appendChild(row);
+      }
+    }
+    el.statsOverlay.classList.remove('hidden');
+    trackModalOpener();
+    el.closeStatsBtn.focus();
+  }
+
+  el.statsBtn?.addEventListener('click', openStats);
+  el.closeStatsBtn?.addEventListener('click', () => hideModal(el.statsOverlay));
+  el.statsOverlay?.addEventListener('click', (e) => {
+    if (e.target === el.statsOverlay) hideModal(el.statsOverlay);
+  });
+
+  // ---------- Keyboard access for the remaining modals (7.17) ----------
+  // Settings and the command palette each manage their own Escape handling;
+  // stats / metrics / model-health / compare are simple overlays, so one
+  // shared close helper + Escape listener covers them. hideModal restores
+  // focus to the element that opened the dialog — each open function moves
+  // focus into the overlay (to its close button), so closing must move it
+  // back or keyboard/SR users are left stranded on a hidden button.
+  let modalOpener = null;
+  function hideModal(overlay) {
+    overlay.classList.add('hidden');
+    if (modalOpener && document.contains(modalOpener)) modalOpener.focus();
+    modalOpener = null;
+  }
+  function trackModalOpener() {
+    modalOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    for (const overlay of [el.statsOverlay, el.metricsOverlay, el.modelsHealthOverlay, el.compareOverlay]) {
+      if (overlay && !overlay.classList.contains('hidden')) {
+        hideModal(overlay);
+        return;
+      }
+    }
+  });
+
+  // Focus trap (7.17): while a dialog is open, Tab must cycle inside it —
+  // otherwise focus escapes to the page behind the overlay, which keyboard
+  // and screen-reader users can't see. One shared handler covers every
+  // overlay (settings, palette, and the four simple ones); exactly one is
+  // ever open, so the single-open guard also keeps this inert otherwise.
+  const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const open = [el.settingsOverlay, el.statsOverlay, el.metricsOverlay, el.modelsHealthOverlay, el.compareOverlay, el.paletteOverlay]
+      .filter((o) => o && !o.classList.contains('hidden'));
+    if (open.length !== 1) return;
+    const focusables = open[0].querySelectorAll(FOCUSABLE_SELECTOR);
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !open[0].contains(document.activeElement))) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
+  // ---------- Server metrics dashboard ----------
+  // Renders the snapshot from GET /api/metrics (metrics.js): totals up
+  // front, then one row per method+route with request counts, status
+  // breakdown, and latency min/avg/max. Data is in-memory and resets when
+  // the server restarts — the header says so, so nobody reads a small
+  // number after a fresh start as a drop in traffic.
+  async function openMetrics() {
+    el.metricsOverlay.classList.remove('hidden');
+    trackModalOpener();
+    el.closeMetricsBtn.focus();
+    await renderMetrics();
+  }
+
+  async function renderMetrics() {
+    el.metricsBody.innerHTML = '<p class="muted">Loading…</p>';
+    let snap;
+    try {
+      snap = await apiRequest('/api/metrics');
+    } catch (err) {
+      el.metricsBody.innerHTML = '';
+      el.metricsBody.appendChild(buildMetricsSummary('Could not load metrics', err.message, ''));
+      return;
+    }
+
+    el.metricsBody.innerHTML = '';
+    const uptimeMin = snap.uptimeSeconds >= 90
+      ? `${Math.round(snap.uptimeSeconds / 60)} min`
+      : `${snap.uptimeSeconds}s`;
+    el.metricsBody.appendChild(
+      buildMetricsSummary('Since server start', `${snap.totalRequests} requests`, `uptime ${uptimeMin} · ${snap.upstreamErrorCount} upstream errors`)
+    );
+
+    const routes = Object.entries(snap.routes || {}).sort((a, b) => b[1].count - a[1].count);
+    if (!routes.length) return;
+
+    const table = document.createElement('table');
+    table.className = 'metrics-table';
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>Route</th><th>Requests</th><th>Statuses</th><th>Latency min/avg/max</th></tr>';
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const [route, s] of routes) {
+      const tr = document.createElement('tr');
+
+      const name = document.createElement('td');
+      name.textContent = route;
+
+      const count = document.createElement('td');
+      count.textContent = String(s.count);
+
+      const statuses = document.createElement('td');
+      statuses.textContent = Object.entries(s.statusCounts || {})
+        .map(([code, n]) => `${code}×${n}`)
+        .join(', ');
+
+      const latency = document.createElement('td');
+      latency.textContent = `${s.minMs} / ${s.avgMs} / ${s.maxMs} ms`;
+
+      tr.appendChild(name);
+      tr.appendChild(count);
+      tr.appendChild(statuses);
+      tr.appendChild(latency);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    el.metricsBody.appendChild(table);
+    el.metricsBody.insertAdjacentHTML(
+      'beforeend',
+      '<p class="muted">In-memory only — these counters reset whenever the server restarts.</p>'
+    );
+  }
+
+  function buildMetricsSummary(title, value, sub) {
+    const box = document.createElement('div');
+    box.className = 'metrics-summary';
+    const h = document.createElement('div');
+    h.className = 'stats-label';
+    h.textContent = title;
+    const v = document.createElement('div');
+    v.textContent = value;
+    box.appendChild(h);
+    box.appendChild(v);
+    if (sub) {
+      const s = document.createElement('small');
+      s.textContent = sub;
+      box.appendChild(s);
+    }
+    return box;
+  }
+
+  el.metricsBtn?.addEventListener('click', openMetrics);
+  el.metricsRefreshBtn?.addEventListener('click', renderMetrics);
+  el.closeMetricsBtn?.addEventListener('click', () => hideModal(el.metricsOverlay));
+  el.metricsOverlay?.addEventListener('click', (e) => {
+    if (e.target === el.metricsOverlay) hideModal(el.metricsOverlay);
+  });
+
+  // ---------- Model health (7.10) ----------
+  // Renders the /api/models/health snapshot: Ollama version, installed
+  // models with sizes, currently loaded models with VRAM residency, and
+  // the account's recent pull history from the audit log.
+  async function renderModelsHealth() {
+    el.modelsHealthBody.innerHTML = '<p class="muted">Loading…</p>';
+    let snap;
+    try {
+      snap = await apiRequest('/api/models/health');
+    } catch (err) {
+      el.modelsHealthBody.innerHTML = '';
+      el.modelsHealthBody.appendChild(buildMetricsSummary('Could not load model health', err.message, ''));
+      return;
+    }
+
+    el.modelsHealthBody.innerHTML = '';
+    const version = snap.ollama && snap.ollama.version ? snap.ollama.version : 'unknown';
+    el.modelsHealthBody.appendChild(
+      buildMetricsSummary('Ollama', `v${version}`, `${snap.installed.length} installed · ${snap.loaded.length} loaded`)
+    );
+
+    if (snap.loaded.length) {
+      const title = document.createElement('div');
+      title.className = 'stats-label';
+      title.textContent = 'Loaded in memory';
+      el.modelsHealthBody.appendChild(title);
+      const table = document.createElement('table');
+      table.className = 'metrics-table';
+      table.innerHTML = '<thead><tr><th>Model</th><th>Size</th><th>On GPU</th><th>Unloads</th></tr></thead>';
+      const tbody = document.createElement('tbody');
+      for (const m of snap.loaded) {
+        const tr = document.createElement('tr');
+        const cells = [
+          m.name,
+          m.size ? formatBytes(m.size) : '—',
+          m.sizeVram ? formatBytes(m.sizeVram) : '— (CPU)',
+          m.expiresAt ? new Date(m.expiresAt).toLocaleTimeString() : '—',
+        ];
+        for (const text of cells) {
+          const td = document.createElement('td');
+          td.textContent = text;
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      el.modelsHealthBody.appendChild(table);
+    }
+
+    if (snap.installed.length) {
+      const title = document.createElement('div');
+      title.className = 'stats-label';
+      title.textContent = 'Installed models';
+      el.modelsHealthBody.appendChild(title);
+      for (const m of snap.installed) {
+        const item = document.createElement('div');
+        item.className = 'model-manage-item';
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = m.name + (m.parameterSize ? ` · ${m.parameterSize}` : '') + (m.quantization ? ` · ${m.quantization}` : '');
+        const size = document.createElement('span');
+        size.className = 'size';
+        size.textContent = m.size ? formatBytes(m.size) : '';
+        item.appendChild(name);
+        item.appendChild(size);
+        el.modelsHealthBody.appendChild(item);
+      }
+
+      // Quantization advisor (7.12): point out installed smaller variants
+      // of the same base model that would save real disk space.
+      const suggestions = quantizationSuggestions(snap.installed);
+      if (suggestions.length) {
+        const qTitle = document.createElement('div');
+        qTitle.className = 'stats-label';
+        qTitle.textContent = 'Space-saving suggestions';
+        el.modelsHealthBody.appendChild(qTitle);
+        for (const s of suggestions) {
+          const item = document.createElement('div');
+          item.className = 'muted';
+          item.textContent = `"${s.model}" has a smaller variant installed: "${s.suggestion}" saves ${formatBytes(s.savedBytes)} (${s.savedPercent}%). Delete the bigger one from Settings if you no longer need it.`;
+          el.modelsHealthBody.appendChild(item);
+        }
+      }
+    }
+
+    if (snap.pulls.length) {
+      const title = document.createElement('div');
+      title.className = 'stats-label';
+      title.textContent = 'Recent pulls (this account)';
+      el.modelsHealthBody.appendChild(title);
+      for (const entry of snap.pulls) {
+        const item = document.createElement('div');
+        item.className = 'muted';
+        item.textContent = `${new Date(entry.at).toLocaleString()} — ${entry.detail}`;
+        el.modelsHealthBody.appendChild(item);
+      }
+    }
+  }
+
+  el.modelsHealthBtn?.addEventListener('click', () => {
+    el.modelsHealthOverlay.classList.remove('hidden');
+    trackModalOpener();
+    el.closeModelsHealthBtn.focus();
+    renderModelsHealth();
+  });
+  el.modelsHealthRefreshBtn?.addEventListener('click', renderModelsHealth);
+  el.closeModelsHealthBtn?.addEventListener('click', () => hideModal(el.modelsHealthOverlay));
+  el.modelsHealthOverlay?.addEventListener('click', (e) => {
+    if (e.target === el.modelsHealthOverlay) hideModal(el.modelsHealthOverlay);
+  });
+
+  // ---------- Model comparison (F4) ----------
+  function openCompare() {
+    el.compareModelList.innerHTML = '';
+    el.compareResults.innerHTML = '';
+    if (!models.length) {
+      el.compareModelList.innerHTML = '<div class="muted">No models installed.</div>';
+    } else {
+      models.slice(0, 8).forEach((m, i) => {
+        const label = document.createElement('label');
+        label.className = 'checkbox-row';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.value = m.name;
+        box.dataset.maxGuard = '1';
+        box.addEventListener('change', () => {
+          const checked = el.compareModelList.querySelectorAll('input:checked');
+          if (checked.length >= 4) {
+            for (const other of el.compareModelList.querySelectorAll('input:not(:checked)')) {
+              other.disabled = true;
+            }
+          } else {
+            for (const other of el.compareModelList.querySelectorAll('input')) {
+              other.disabled = false;
+            }
+          }
+        });
+        if (i === 0) box.checked = true;
+        label.appendChild(box);
+        label.appendChild(document.createTextNode(` ${m.name}`));
+        el.compareModelList.appendChild(label);
+      });
+    }
+    el.compareOverlay.classList.remove('hidden');
+    trackModalOpener();
+    el.closeCompareBtn.focus();
+  }
+
+  el.compareBtn?.addEventListener('click', openCompare);
+  el.closeCompareBtn?.addEventListener('click', () => hideModal(el.compareOverlay));
+  el.compareOverlay?.addEventListener('click', (e) => {
+    if (e.target === el.compareOverlay) hideModal(el.compareOverlay);
+  });
+
+  // Council mode (7.5): same modal as compare, but the endpoint also runs a
+  // synthesis pass and the merged answer renders above the member columns.
+  el.councilRunBtn?.addEventListener('click', async () => {
+    const selected = [...el.compareModelList.querySelectorAll('input:checked')].map((b) => b.value);
+    const prompt = el.comparePrompt.value.trim();
+    if (selected.length < 2) {
+      showError('Select at least two models for the council.');
+      return;
+    }
+    if (!prompt) {
+      showError('Enter a prompt to run the council on.');
+      return;
+    }
+    el.councilRunBtn.disabled = true;
+    el.compareResults.innerHTML = '<div class="muted">Convening the council… (every selected model answers, then a synthesis pass merges them)</div>';
+    try {
+      const data = await apiRequest('/api/council', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selected,
+          prompt,
+          synthesizer: selected[0],
+          options: { temperature: settings.temperature, top_p: settings.topP },
+          serverId: settings.serverId || 0,
+        }),
+      });
+      el.compareResults.innerHTML = '';
+      if (data.synthesis) {
+        const box = document.createElement('div');
+        box.className = 'council-synthesis';
+        const head = document.createElement('div');
+        head.className = 'compare-head';
+        head.textContent = `Council synthesis · ${data.synthesis.model}`;
+        const body = document.createElement('div');
+        body.className = 'msg-content';
+        body.innerHTML = data.synthesis.error
+          ? `<em class="muted">${data.synthesis.error}</em>`
+          : renderMarkdown(data.synthesis.content || '_(empty)_');
+        box.appendChild(head);
+        box.appendChild(body);
+        el.compareResults.appendChild(box);
+      }
+      for (const r of data.results || []) {
+        const col = document.createElement('div');
+        col.className = 'compare-col';
+        const head = document.createElement('div');
+        head.className = 'compare-head';
+        const tps = r.evalCount && r.evalDuration
+          ? ` · ${Math.round(r.evalCount / (r.evalDuration / 1e9))} tok/s`
+          : '';
+        head.textContent = `${r.model} · ${r.durationMs}ms${tps}`;
+        const body = document.createElement('div');
+        body.className = 'msg-content';
+        body.innerHTML = r.error
+          ? `<em class="muted">${r.error}</em>`
+          : renderMarkdown(r.content || '_(empty)_');
+        col.appendChild(head);
+        col.appendChild(body);
+        el.compareResults.appendChild(col);
+      }
+    } catch (err) {
+      el.compareResults.innerHTML = '';
+      showError(err.message);
+    } finally {
+      el.councilRunBtn.disabled = false;
+    }
+  });
+
+  el.compareRunBtn?.addEventListener('click', async () => {
+    const selected = [...el.compareModelList.querySelectorAll('input:checked')].map((b) => b.value);
+    const prompt = el.comparePrompt.value.trim();
+    if (selected.length < 2) {
+      showError('Select at least two models to compare.');
+      return;
+    }
+    if (!prompt) {
+      showError('Enter a prompt to compare on.');
+      return;
+    }
+    el.compareRunBtn.disabled = true;
+    el.compareResults.innerHTML = '<div class="muted">Running…</div>';
+    try {
+      const data = await apiRequest('/api/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selected,
+          prompt,
+          options: { temperature: settings.temperature, top_p: settings.topP },
+          serverId: settings.serverId || 0,
+        }),
+      });
+      el.compareResults.innerHTML = '';
+      for (const r of data.results || []) {
+        const col = document.createElement('div');
+        col.className = 'compare-col';
+        const head = document.createElement('div');
+        head.className = 'compare-head';
+        const tps = r.evalCount && r.evalDuration
+          ? ` · ${Math.round(r.evalCount / (r.evalDuration / 1e9))} tok/s`
+          : '';
+        head.textContent = `${r.model} · ${r.durationMs}ms${tps}`;
+        const body = document.createElement('div');
+        body.className = 'msg-content';
+        body.innerHTML = r.error
+          ? `<em class="muted">${r.error}</em>`
+          : renderMarkdown(r.content || '_(empty)_');
+        col.appendChild(head);
+        col.appendChild(body);
+        el.compareResults.appendChild(col);
+      }
+    } catch (err) {
+      el.compareResults.innerHTML = '';
+      showError(err.message);
+    } finally {
+      el.compareRunBtn.disabled = false;
+    }
+  });
+
   // Fetches the auth-scoped full export (GET /api/export) and hands it to
   // the browser as a JSON download. Uses the raw fetch rather than
   // apiRequest because the response is the file itself, not a JSON envelope
@@ -1426,6 +3259,127 @@
       showError(`Export failed: ${err.message}`);
     } finally {
       el.downloadDataBtn.disabled = false;
+    }
+  });
+
+  // ---------- Usage report (Phase 7.20) ----------
+  el.usageReportBtn?.addEventListener('click', async () => {
+    el.usageReportBtn.disabled = true;
+    el.usageReportBody.innerHTML = '<div class="muted">Crunching…</div>';
+    try {
+      const report = await apiRequest('/api/usage-report');
+      el.usageReportBody.innerHTML = '';
+      const t = report.totals || {};
+      const rows = [
+        ['Sessions', String(t.sessions ?? 0)],
+        ['Messages', `${t.messages ?? 0} (${t.userMessages ?? 0} you, ${t.assistantMessages ?? 0} assistant)`],
+        ['Estimated tokens (all time)', `~${formatTokens(t.estimatedTokens || 0)}`],
+        ['Estimated tokens (last 7 days)', `~${formatTokens(t.estimatedTokensLastWeek || 0)}`],
+        ['Models used', (report.byModel || []).map((m) => `${m.model} (${m.messages})`).join(', ') || '—'],
+      ];
+      for (const [label, value] of rows) {
+        const row = document.createElement('div');
+        row.className = 'stats-row';
+        const l = document.createElement('span');
+        l.className = 'stats-label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.textContent = value;
+        row.appendChild(l);
+        row.appendChild(v);
+        el.usageReportBody.appendChild(row);
+      }
+      if ((report.topChats || []).length) {
+        const title = document.createElement('div');
+        title.className = 'stats-label';
+        title.textContent = 'Largest chats';
+        el.usageReportBody.appendChild(title);
+        for (const c of report.topChats) {
+          const item = document.createElement('div');
+          item.className = 'muted';
+          item.textContent = `${c.title} — ${c.messages} messages (~${formatTokens(c.estimatedTokens || 0)} tokens)`;
+          el.usageReportBody.appendChild(item);
+        }
+      }
+    } catch (err) {
+      el.usageReportBody.innerHTML = '';
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = `Usage report unavailable: ${err.message}`;
+      el.usageReportBody.appendChild(note);
+    } finally {
+      el.usageReportBtn.disabled = false;
+    }
+  });
+
+  // ---------- Scheduled session cleanup (Phase 7.18) ----------
+  function cleanupCutoffDays() {
+    const days = Number(el.cleanupDays.value);
+    if (!Number.isFinite(days) || days < 1 || days > 3650 || !Number.isInteger(days)) {
+      showError('"days" must be a whole number between 1 and 3650.');
+      return null;
+    }
+    return days;
+  }
+
+  el.cleanupPreviewBtn?.addEventListener('click', async () => {
+    const days = cleanupCutoffDays();
+    if (days === null) return;
+    el.cleanupPreviewBtn.disabled = true;
+    el.cleanupPreviewBody.innerHTML = '<div class="muted">Counting…</div>';
+    try {
+      const data = await apiRequest(`/api/cleanup/preview?days=${days}`);
+      el.cleanupPreviewBody.innerHTML = '';
+      const head = document.createElement('div');
+      head.className = 'muted';
+      head.textContent = data.count
+        ? `${data.count} chat${data.count === 1 ? '' : 's'} not touched since ${new Date(data.cutoff).toLocaleDateString()}${data.sessions.length < data.count ? ` (showing ${data.sessions.length})` : ''}:`
+        : 'Nothing to delete — no chats are that old.';
+      el.cleanupPreviewBody.appendChild(head);
+      for (const s of data.sessions) {
+        const item = document.createElement('div');
+        item.className = 'model-manage-item';
+        item.textContent = `${s.title} — last touched ${new Date(s.updatedAt).toLocaleDateString()}`;
+        el.cleanupPreviewBody.appendChild(item);
+      }
+    } catch (err) {
+      el.cleanupPreviewBody.innerHTML = '';
+      showError(err.message);
+    } finally {
+      el.cleanupPreviewBtn.disabled = false;
+    }
+  });
+
+  el.cleanupRunBtn?.addEventListener('click', async () => {
+    const days = cleanupCutoffDays();
+    if (days === null) return;
+    // The server refuses to delete without confirm:true; the double confirm
+    // here is the human half of that guard.
+    if (!confirm(`Delete every chat not touched in the last ${days} day(s)? This cannot be undone. Preview first if you're unsure.`)) return;
+    el.cleanupRunBtn.disabled = true;
+    try {
+      const data = await apiRequest('/api/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days, confirm: true }),
+      });
+      el.cleanupPreviewBody.innerHTML = `<div class="muted">Deleted ${data.deleted} chat${data.deleted === 1 ? '' : 's'}.</div>`;
+      await refreshChatList();
+      if (activeChatId && !chats.some((c) => c.id === activeChatId)) {
+        activeChatId = null;
+        activeSession = null;
+        if (chats.length) await selectChat(chats[0].id);
+        renderChatList();
+        renderMessages();
+        updateTitle();
+      } else {
+        renderChatList();
+      }
+      await renderAudit();
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      el.cleanupRunBtn.disabled = false;
     }
   });
 
@@ -1459,6 +3413,8 @@
   async function init() {
     currentTheme = loadTheme();
     applyTheme(currentTheme);
+    loadPresets();
+    loadTemplates();
     // Start collapsed on phone-width screens — there the sidebar is a full
     // overlay (see MOBILE_OVERLAY_QUERY), and opening on top of the chat by
     // default would hide the one thing the user came here for.
@@ -1475,15 +3431,19 @@
     }
     await maybeOfferMigration();
     await loadModels();
+    await loadServers();
     renderChatList();
     renderMessages();
     updateTitle();
     autoResizeTextarea();
+    renderShortcutBar();
+    updateOfflineQueueStatus();
     setInterval(async () => {
       try {
         const r = await fetch('/api/health');
-        const d = await r.json();
-        setStatus(d.ok, d.error);
+      const d = await r.json();
+      setStatus(d.ok, d.error);
+      if (d.ok) flushOfflineQueue();   // server is back — drain queued sends
       } catch {
         setStatus(false, 'Ollama unreachable');
       }
@@ -1491,4 +3451,18 @@
   }
 
   init();
+
+  // ---------- PWA registration (7.16) ----------
+  // Fail-open by design: a rejected registration must never break the app.
+  // Only register on https or localhost (file:// and plain-LAN http would
+  // throw); the service worker itself never caches /api/* traffic.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      const secure = window.isSecureContext || location.hostname === 'localhost';
+      if (!secure) return;
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        /* offline shell unavailable — the app works unchanged without it */
+      });
+    });
+  }
 })();
